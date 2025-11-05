@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Any
+from typing import Any, FrozenSet, List, Optional
 import json, re
 
 # AST node classes (same as previous cell)
@@ -376,21 +376,53 @@ def expr_to_text(e: Expr) -> str:
     if e.kind == "list": return "[" + " ".join(expr_to_text(x) for x in (e.items or [])) + "]"
     return str(e)
 
-def summarize_block(block: Block, indent=0) -> List[str]:
+def summarize_block(
+    block: Block,
+    indent: int = 0,
+    *,
+    iteratively: bool = False,
+    procedure_lookup: Optional[dict[str, Procedure]] = None,
+    call_stack: Optional[FrozenSet[str]] = None,
+) -> List[str]:
     lines = []
     pad = "  " * indent
+    active_stack = call_stack or frozenset()
     for stmt in block.statements:
         if isinstance(stmt, If):
             lines.append(f"{pad}IF {expr_to_text(stmt.condition)} THEN:")
-            lines += summarize_block(stmt.then_block, indent+1)
+            lines += summarize_block(
+                stmt.then_block,
+                indent + 1,
+                iteratively=iteratively,
+                procedure_lookup=procedure_lookup,
+                call_stack=active_stack,
+            )
         elif isinstance(stmt, IfElse):
             lines.append(f"{pad}IF {expr_to_text(stmt.condition)} THEN:")
-            lines += summarize_block(stmt.then_block, indent+1)
+            lines += summarize_block(
+                stmt.then_block,
+                indent + 1,
+                iteratively=iteratively,
+                procedure_lookup=procedure_lookup,
+                call_stack=active_stack,
+            )
             lines.append(f"{pad}ELSE:")
-            lines += summarize_block(stmt.else_block, indent+1)
+            lines += summarize_block(
+                stmt.else_block,
+                indent + 1,
+                iteratively=iteratively,
+                procedure_lookup=procedure_lookup,
+                call_stack=active_stack,
+            )
         elif isinstance(stmt, Ask):
             lines.append(f"{pad}ASK {expr_to_text(stmt.agentset)} DO:")
-            lines += summarize_block(stmt.block, indent+1)
+            lines += summarize_block(
+                stmt.block,
+                indent + 1,
+                iteratively=iteratively,
+                procedure_lookup=procedure_lookup,
+                call_stack=active_stack,
+            )
         elif isinstance(stmt, Set):
             lines.append(f"{pad}SET {stmt.name} = {expr_to_text(stmt.value)}")
         elif isinstance(stmt, Let):
@@ -399,14 +431,52 @@ def summarize_block(block: Block, indent=0) -> List[str]:
             lines.append(f"{pad}REPORT {expr_to_text(stmt.value)}")
         elif isinstance(stmt, Call):
             args = " ".join(expr_to_text(a) for a in stmt.args)
+            header = f"{pad}{stmt.name.upper()} {args}".rstrip()
             if stmt.block:
-                lines.append(f"{pad}{stmt.name.upper()} {args} THEN:")
-                lines += summarize_block(stmt.block, indent+1)
+                header = f"{header} THEN:"
+                lines.append(header)
+                lines += summarize_block(
+                    stmt.block,
+                    indent + 1,
+                    iteratively=iteratively,
+                    procedure_lookup=procedure_lookup,
+                    call_stack=active_stack,
+                )
             else:
-                lines.append(f"{pad}{stmt.name.upper()} {args}".rstrip())
+                lines.append(header)
+
+            if iteratively and procedure_lookup:
+                target_key = stmt.name.lower()
+                target_proc = procedure_lookup.get(target_key)
+                if target_proc:
+                    recur_indent = "  " * (indent + 1)
+                    if target_key in active_stack:
+                        lines.append(f"{recur_indent}<recursive call to {target_proc.name}>")
+                    else:
+                        lines += summarize_block(
+                            target_proc.body,
+                            indent + 1,
+                            iteratively=iteratively,
+                            procedure_lookup=procedure_lookup,
+                            call_stack=active_stack.union({target_key}),
+                        )
         else:
             lines.append(f"{pad}{stmt.__class__.__name__}")
     return lines
+
+def describe_procedure(program: Program, procedure_name: str, *, iteratively: bool = False) -> str:
+    lookup = {proc.name.lower(): proc for proc in program.procedures}
+    target = lookup.get(procedure_name.lower())
+    if not target:
+        raise ValueError(f"Procedure '{procedure_name}' not found.")
+    initial_stack = frozenset({target.name.lower()}) if iteratively else None
+    lines = summarize_block(
+        target.body,
+        iteratively=iteratively,
+        procedure_lookup=lookup,
+        call_stack=initial_stack,
+    )
+    return "\n".join(lines)
 
 # Run on provided code
 netlogo_code = r'''globals [ max-sheep ]  ; don't let the sheep population grow too large
@@ -541,57 +611,14 @@ to display-labels
 end
 '''
 
+proc_name = "eat-sheep"
 tokens = tokenize(netlogo_code)
 parser = Parser(tokens)
 program = parser.parse_program()
-go_proc = {p.name: p for p in program.procedures}.get("move")
-
-def ast_to_json(obj) -> str:
-    return json.dumps(obj.to_dict(), indent=2)
-
-def expr_to_text(e: Expr) -> str:
-    if e is None: return ""
-    if e.kind == "symbol": return str(e.value)
-    if e.kind == "number": return str(e.value)
-    if e.kind == "string": return f'"{e.value}"'
-    if e.kind == "infix": return f"({expr_to_text(e.left)} {e.op} {expr_to_text(e.right)})"
-    if e.kind == "list": return "[" + " ".join(expr_to_text(x) for x in (e.items or [])) + "]"
-    return str(e)
-
-def summarize_block(block: Block, indent=0) -> List[str]:
-    lines = []
-    pad = "  " * indent
-    for stmt in block.statements:
-        if isinstance(stmt, If):
-            lines.append(f"{pad}IF {expr_to_text(stmt.condition)} THEN:")
-            lines += summarize_block(stmt.then_block, indent+1)
-        elif isinstance(stmt, IfElse):
-            lines.append(f"{pad}IF {expr_to_text(stmt.condition)} THEN:")
-            lines += summarize_block(stmt.then_block, indent+1)
-            lines.append(f"{pad}ELSE:")
-            lines += summarize_block(stmt.else_block, indent+1)
-        elif isinstance(stmt, Ask):
-            lines.append(f"{pad}ASK {expr_to_text(stmt.agentset)} DO:")
-            lines += summarize_block(stmt.block, indent+1)
-        elif isinstance(stmt, Set):
-            lines.append(f"{pad}SET {stmt.name} = {expr_to_text(stmt.value)}")
-        elif isinstance(stmt, Let):
-            lines.append(f"{pad}LET {stmt.name} = {expr_to_text(stmt.value)}")
-        elif isinstance(stmt, Report):
-            lines.append(f"{pad}REPORT {expr_to_text(stmt.value)}")
-        elif isinstance(stmt, Call):
-            args = " ".join(expr_to_text(a) for a in stmt.args)
-            if stmt.block:
-                lines.append(f"{pad}{stmt.name.upper()} {args} THEN:")
-                lines += summarize_block(stmt.block, indent+1)
-            else:
-                lines.append(f"{pad}{stmt.name.upper()} {args}".rstrip())
-        else:
-            lines.append(f"{pad}{stmt.__class__.__name__}")
-    return lines
+go_proc = {p.name: p for p in program.procedures}.get(proc_name)
 
 focused_json = ast_to_json(go_proc) if go_proc else "{}"
-summary_text = "\n".join(summarize_block(go_proc.body) if go_proc else ["<go not found>"])
+summary_text = describe_procedure(program, proc_name, iteratively=True) 
 
 with open("netlogo_ast.json","w", encoding="utf-8") as f:
     f.write(json.dumps(program.to_dict(), indent=2))
