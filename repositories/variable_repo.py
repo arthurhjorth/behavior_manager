@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from models import LinearCoefficientRecord
+from models import LinearCoefficientRecord, PredicateRecord
 from models import VarType, VariableRecord, _coerce_value_for_storage
 from repositories.decision_repo import ensure_agent
 
@@ -104,6 +104,14 @@ def delete_variable(session: Session, variable_id: int) -> None:
     )
     for coeff in coeffs:
         session.delete(coeff)
+
+    conditions = list(
+        session.exec(
+            select(PredicateRecord).where(PredicateRecord.variable_id == variable_id)
+        )
+    )
+    for condition in conditions:
+        session.delete(condition)
 
     session.delete(row)
     session.commit()

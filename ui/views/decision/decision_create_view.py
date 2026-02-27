@@ -17,10 +17,8 @@ def render_decision_create_view(*, engine, back_url: str, after_create_base_url:
             return
 
         with Session(engine) as session:
-            agent = decision_repo.ensure_agent(session)
             record = decision_repo.create_decision(
                 session,
-                agent_id=agent.id,
                 name=name,
                 description=description,
             )

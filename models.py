@@ -167,9 +167,16 @@ class AdapterEffect(SQLModel):
     logit_delta_by_outcome: dict[str, float] = Field(default_factory=dict)
 
 
+class AdapterLikelihoodMode(str, Enum):
+    multiply = "multiply"
+    set = "set"
+
+
 class BinaryAdapter(Adapter):
     target_outcome: str
     multiplier: float = 1.0
+    likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply
+    set_likelihood: float | None = None
 
     def modify(self, outcomes: list["Outcome"], variables: VarTable) -> list["Outcome"]:
         if any(not func(variables) for func in self.funcs):
@@ -179,13 +186,20 @@ class BinaryAdapter(Adapter):
         for outcome in outcomes:
             likelihood = outcome.likelihood
             if outcome.name == self.target_outcome:
-                likelihood *= self.multiplier
+                if self.likelihood_mode == AdapterLikelihoodMode.set:
+                    if self.set_likelihood is None:
+                        raise ValueError("BinaryAdapter set_likelihood is required when likelihood_mode='set'.")
+                    likelihood = self.set_likelihood
+                else:
+                    likelihood *= self.multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
         return _normalize_outcomes(updated)
 
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
             return AdapterEffect()
+        if self.likelihood_mode == AdapterLikelihoodMode.set:
+            raise ValueError("BinaryAdapter odds mode does not support likelihood_mode='set'.")
         if self.multiplier <= 0.0:
             raise ValueError("BinaryAdapter multiplier must be > 0 for odds mode.")
         return AdapterEffect(logit_delta_by_outcome={self.target_outcome: math.log(self.multiplier)})
@@ -197,6 +211,7 @@ class LinearAdapter(Adapter):
     coefficients: dict[str, float] = Field(default_factory=dict)
     min_multiplier: float = 0.0
     max_multiplier: float | None = None
+    likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply
 
     def required_variable_names(self) -> set[str]:
         return super().required_variable_names().union(self.coefficients.keys())
@@ -224,13 +239,18 @@ class LinearAdapter(Adapter):
         for outcome in outcomes:
             likelihood = outcome.likelihood
             if outcome.name == self.target_outcome:
-                likelihood *= multiplier
+                if self.likelihood_mode == AdapterLikelihoodMode.set:
+                    likelihood = multiplier
+                else:
+                    likelihood *= multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
         return _normalize_outcomes(updated)
 
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
             return AdapterEffect()
+        if self.likelihood_mode == AdapterLikelihoodMode.set:
+            raise ValueError("LinearAdapter odds mode does not support likelihood_mode='set'.")
 
         multiplier = self._compute_multiplier(variables)
         if multiplier <= 0.0:
@@ -361,18 +381,19 @@ class VariableRecord(SQLModel, table=True):
 
     agent: AgentRecord | None = Relationship(back_populates="variables")
     coefficients: list["LinearCoefficientRecord"] = Relationship(back_populates="variable")
+    predicates: list["PredicateRecord"] = Relationship(back_populates="variable")
 
 
 class DecisionRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    agent_id: int = Field(foreign_key="agentrecord.id", index=True)
+    agent_id: int | None = Field(default=None, foreign_key="agentrecord.id", index=True)
 
     name: str
     description: str
 
     agent: AgentRecord | None = Relationship(back_populates="decisions")
     outcomes: list["OutcomeRecord"] = Relationship(back_populates="decision")
-    adapters: list["AdapterRecord"] = Relationship(back_populates="decision")
+    adapter_sets: list["AdapterSetRecord"] = Relationship(back_populates="decision")
 
 
 class OutcomeRecord(SQLModel, table=True):
@@ -383,7 +404,7 @@ class OutcomeRecord(SQLModel, table=True):
     likelihood: float | None = None
 
     decision: DecisionRecord | None = Relationship(back_populates="outcomes")
-    targeted_by_adapters: list["AdapterRecord"] = Relationship(back_populates="target_outcome")
+    targeted_by_effects: list["AdapterRecord"] = Relationship(back_populates="target_outcome")
 
 
 class AdapterType(str, Enum):
@@ -391,21 +412,44 @@ class AdapterType(str, Enum):
     linear = "linear"
 
 
+class ConditionOperator(str, Enum):
+    eq = "eq"
+    ne = "ne"
+    gt = "gt"
+    gte = "gte"
+    lt = "lt"
+    lte = "lte"
+
+
 class AdapterRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    decision_id: int = Field(foreign_key="decisionrecord.id", index=True)
+    adapter_set_id: int = Field(foreign_key="adaptersetrecord.id", index=True)
     target_outcome_id: int = Field(foreign_key="outcomerecord.id", index=True)
+    order_index: int = 0
 
     adapter_type: AdapterType
+    likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply
 
     multiplier: float | None = None
+    set_likelihood: float | None = None
     intercept: float | None = None
     min_multiplier: float | None = None
     max_multiplier: float | None = None
 
-    decision: DecisionRecord | None = Relationship(back_populates="adapters")
-    target_outcome: OutcomeRecord | None = Relationship(back_populates="targeted_by_adapters")
-    coefficients: list["LinearCoefficientRecord"] = Relationship(back_populates="adapter")
+    adapter_set: Optional["AdapterSetRecord"] = Relationship(back_populates="effects")
+    target_outcome: OutcomeRecord | None = Relationship(back_populates="targeted_by_effects")
+    coefficients: list["LinearCoefficientRecord"] = Relationship(back_populates="effect")
+
+
+class AdapterSetRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    decision_id: int = Field(foreign_key="decisionrecord.id", index=True)
+    name: str = "Rule Set"
+    order_index: int = 0
+
+    decision: DecisionRecord | None = Relationship(back_populates="adapter_sets")
+    effects: list[AdapterRecord] = Relationship(back_populates="adapter_set")
+    predicate_groups: list["ConditionChainRecord"] = Relationship(back_populates="adapter_set")
 
 
 class LinearCoefficientRecord(SQLModel, table=True):
@@ -414,8 +458,45 @@ class LinearCoefficientRecord(SQLModel, table=True):
     variable_id: int = Field(foreign_key="variablerecord.id", index=True)
     coefficient: float
 
-    adapter: AdapterRecord | None = Relationship(back_populates="coefficients")
+    effect: AdapterRecord | None = Relationship(back_populates="coefficients")
     variable: VariableRecord | None = Relationship(back_populates="coefficients")
+
+
+class ConditionCombinator(str, Enum):
+    all = "all"
+    any = "any"
+
+
+class ConditionChainRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    adapter_set_id: int = Field(foreign_key="adaptersetrecord.id", index=True)
+    name: str = "Chain"
+    combinator: ConditionCombinator = ConditionCombinator.all
+    order_index: int = 0
+
+    adapter_set: AdapterSetRecord | None = Relationship(back_populates="predicate_groups")
+    predicates: list["PredicateRecord"] = Relationship(back_populates="chain")
+
+
+class PredicateRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    chain_id: int = Field(foreign_key="conditionchainrecord.id", index=True)
+    variable_id: int = Field(foreign_key="variablerecord.id", index=True)
+    operator: ConditionOperator
+    order_index: int = 0
+
+    value_int: int | None = None
+    value_float: float | None = None
+    value_bool: bool | None = None
+
+    chain: ConditionChainRecord | None = Relationship(back_populates="predicates")
+    variable: VariableRecord | None = Relationship(back_populates="predicates")
+
+
+# Domain aliases using requested terminology.
+RuleRecord = AdapterRecord
+PredicateGroupRecord = ConditionChainRecord
+RuleChainRecord = DecisionRecord
 
 
 # --- DB helpers ---
@@ -548,7 +629,12 @@ def add_agent_variable(
     return record
 
 
-def create_decision_record(session: Session, agent_id: int, name: str, description: str) -> DecisionRecord:
+def create_decision_record(
+    session: Session,
+    name: str,
+    description: str,
+    agent_id: int | None = None,
+) -> DecisionRecord:
     record = DecisionRecord(agent_id=agent_id, name=name, description=description)
     session.add(record)
     session.commit()

@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from nicegui import ui
 
+from models import AdapterLikelihoodMode
 from ui.components.form_actions import form_actions
 
 
@@ -13,7 +14,9 @@ def render_binary_adapter_form(
     outcome_options: dict[int, str],
     initial_target_outcome_id: int | None,
     initial_multiplier: float,
-    on_submit: Callable[[int | None, float], None],
+    initial_likelihood_mode: AdapterLikelihoodMode,
+    initial_set_likelihood: float | None,
+    on_submit: Callable[[int | None, float, AdapterLikelihoodMode, float | None], None],
     on_cancel: Callable[[], None],
 ) -> None:
     ui.label(title).classes('text-h6')
@@ -22,10 +25,26 @@ def render_binary_adapter_form(
         value=initial_target_outcome_id,
         label='Target outcome',
     ).classes('w-full')
+    mode_select = ui.select(
+        options={m.value: m.value for m in AdapterLikelihoodMode},
+        value=initial_likelihood_mode.value,
+        label='Likelihood mode',
+    ).classes('w-full')
     multiplier_input = ui.number('Multiplier (> 0)', value=initial_multiplier, min=0.0001, step=0.1).classes('w-full')
+    set_like_input = ui.input(
+        'Set likelihood (used in set mode)',
+        value='' if initial_set_likelihood is None else str(initial_set_likelihood),
+    ).classes('w-full')
 
     def handle_submit() -> None:
         selected = None if target_select.value is None else int(target_select.value)
-        on_submit(selected, float(multiplier_input.value or 1.0))
+        mode = AdapterLikelihoodMode(str(mode_select.value))
+        raw_set = (set_like_input.value or '').strip()
+        try:
+            set_likelihood = float(raw_set) if raw_set else None
+        except ValueError:
+            ui.notify('Set likelihood must be a number.', color='negative')
+            return
+        on_submit(selected, float(multiplier_input.value or 1.0), mode, set_likelihood)
 
     form_actions(on_save=handle_submit, on_cancel=on_cancel)

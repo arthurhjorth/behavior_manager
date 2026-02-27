@@ -55,9 +55,9 @@ def render_decision_edit_view(*, engine, decision_id: int, back_url: str) -> Non
         render_adapter_list(
             engine=engine,
             decision_id=decision_id,
-            on_edit=lambda adapter_id: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_id}/edit'),
+            on_edit=lambda adapter_set_id: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set_id}/edit'),
             on_create=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/new'),
-            on_delete=lambda adapter_id: _delete_adapter(engine, decision_id, adapter_id),
+            on_delete=lambda adapter_set_id: _delete_adapter_set(engine, decision_id, adapter_set_id),
         )
 
 
@@ -85,8 +85,8 @@ def _delete_outcome(engine, decision_id: int, outcome_id: int) -> None:
     ui.navigate.to(f'/decisions/{decision_id}')
 
 
-def _delete_adapter(engine, decision_id: int, adapter_id: int) -> None:
+def _delete_adapter_set(engine, decision_id: int, adapter_set_id: int) -> None:
     with Session(engine) as session:
-        decision_repo.delete_adapter(session, adapter_id)
-    ui.notify('Adapter deleted.', color='positive')
+        decision_repo.delete_adapter_set(session, adapter_set_id)
+    ui.notify('Adapter set deleted.', color='positive')
     ui.navigate.to(f'/decisions/{decision_id}')

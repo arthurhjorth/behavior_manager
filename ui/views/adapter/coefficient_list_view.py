@@ -25,10 +25,8 @@ def render_coefficient_list(
         adapter = session.get(AdapterRecord, adapter_id)
         variable_name_by_id: dict[int, str] = {}
         if adapter is not None:
-            decision = decision_repo.get_decision(session, adapter.decision_id)
-            if decision is not None:
-                variables = decision_repo.list_variables(session, decision.agent_id)
-                variable_name_by_id = {variable.id: variable.name for variable in variables}
+            variables = decision_repo.list_variables(session)
+            variable_name_by_id = {int(variable.id): variable.name for variable in variables if variable.id is not None}
 
     if not coeffs:
         ui.label('No coefficients yet.')

@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from nicegui import ui
 
+from models import AdapterLikelihoodMode
 from ui.components.form_actions import form_actions
 
 
@@ -15,7 +16,8 @@ def render_linear_adapter_form(
     initial_intercept: float,
     initial_min_multiplier: float,
     initial_max_multiplier: float | None,
-    on_submit: Callable[[int | None, float, float, float | None], None],
+    initial_likelihood_mode: AdapterLikelihoodMode,
+    on_submit: Callable[[int | None, float, float, float | None, AdapterLikelihoodMode], None],
     on_cancel: Callable[[], None],
 ) -> None:
     ui.label(title).classes('text-h6')
@@ -23,6 +25,11 @@ def render_linear_adapter_form(
         options=outcome_options,
         value=initial_target_outcome_id,
         label='Target outcome',
+    ).classes('w-full')
+    mode_select = ui.select(
+        options={m.value: m.value for m in AdapterLikelihoodMode},
+        value=initial_likelihood_mode.value,
+        label='Likelihood mode',
     ).classes('w-full')
     intercept_input = ui.number('Intercept', value=initial_intercept, step=0.1).classes('w-full')
     min_input = ui.number('Min multiplier', value=initial_min_multiplier, step=0.1).classes('w-full')
@@ -38,6 +45,7 @@ def render_linear_adapter_form(
             float(intercept_input.value or 0.0),
             float(min_input.value or 0.0),
             max_multiplier,
+            AdapterLikelihoodMode(str(mode_select.value)),
         )
 
     form_actions(on_save=handle_submit, on_cancel=on_cancel)

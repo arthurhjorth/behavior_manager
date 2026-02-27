@@ -7,6 +7,7 @@ from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
 from models import create_study, get_engine, init_db, list_studies
+from ui.components.page_shell import page_shell
 from ui.pages.decisions_page import register_decision_pages
 from ui.pages.variables_page import register_variable_pages
 
@@ -44,8 +45,8 @@ def _safe_destination(filename: str) -> Path:
 
 @ui.page('/')
 def index() -> None:
-    with ui.column().classes('items-start gap-2 p-6'):
-        ui.label('Behavior Manager').classes('text-h5')
+    with page_shell(title='Home', breadcrumb_path='/', max_width_class='max-w-3xl'):
+        ui.label('Choose a section').classes('text-body1')
         ui.link('Go to studies', '/studies/')
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
@@ -53,8 +54,7 @@ def index() -> None:
 
 @ui.page('/studies/')
 def studies_page() -> None:
-    with ui.column().classes('w-full max-w-3xl p-6 gap-4'):
-        ui.label('Studies').classes('text-h5')
+    with page_shell(title='Studies', breadcrumb_path='/studies/', max_width_class='max-w-3xl'):
         status = ui.label('Upload PDF studies to populate this list and DB.').classes('text-body2')
         list_container = ui.column().classes('gap-2')
 

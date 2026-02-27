@@ -4,6 +4,7 @@ from nicegui import ui
 from sqlmodel import Session
 
 from repositories import variable_repo
+from ui.components.page_shell import page_shell
 from ui.views.variable.variable_create_view import render_variable_create_view
 from ui.views.variable.variable_edit_view import render_variable_edit_view
 from ui.views.variable.variable_list_view import render_variable_list
@@ -12,7 +13,7 @@ from ui.views.variable.variable_list_view import render_variable_list
 def register_variable_pages(engine) -> None:
     @ui.page('/variables')
     def variables_index() -> None:
-        with ui.column().classes('w-full max-w-4xl p-6 gap-4'):
+        with page_shell(title='Variables', breadcrumb_path='/variables', max_width_class='max-w-4xl'):
             render_variable_list(
                 engine=engine,
                 agent_id=None,
@@ -23,12 +24,16 @@ def register_variable_pages(engine) -> None:
 
     @ui.page('/variables/new')
     def variable_create() -> None:
-        with ui.column().classes('w-full max-w-2xl p-6 gap-4'):
+        with page_shell(title='Create Variable', breadcrumb_path='/variables/new', max_width_class='max-w-2xl'):
             render_variable_create_view(engine=engine, agent_id=None, back_url='/variables')
 
     @ui.page('/variables/{variable_id}/edit')
     def variable_edit(variable_id: int) -> None:
-        with ui.column().classes('w-full max-w-2xl p-6 gap-4'):
+        with page_shell(
+            title='Edit Variable',
+            breadcrumb_path=f'/variables/{variable_id}/edit',
+            max_width_class='max-w-2xl',
+        ):
             render_variable_edit_view(engine=engine, variable_id=variable_id, back_url='/variables')
 
 
