@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from typing import Optional
 
 from nicegui import ui
 
 
 @contextmanager
-def page_shell(*, title: str, breadcrumb_path: str, max_width_class: str = 'max-w-4xl'):
+def page_shell(
+    *,
+    title: str,
+    breadcrumb_path: str,
+    max_width_class: str = 'max-w-4xl',
+    breadcrumb_items: Optional[list[tuple[str, str | None]]] = None,
+):
     with ui.column().classes(f'w-full {max_width_class} p-6 gap-4'):
         _render_header(title)
-        _render_breadcrumbs(breadcrumb_path)
+        _render_breadcrumbs(breadcrumb_path, breadcrumb_items)
         ui.separator()
         yield
 
@@ -25,9 +32,21 @@ def _render_header(title: str) -> None:
             ui.link('Studies', '/studies/')
             ui.link('Decisions', '/decisions')
             ui.link('Variables', '/variables')
+            ui.link('Contexts', '/contexts')
 
 
-def _render_breadcrumbs(path: str) -> None:
+def _render_breadcrumbs(path: str, breadcrumb_items: Optional[list[tuple[str, str | None]]] = None) -> None:
+    if breadcrumb_items:
+        with ui.row().classes('items-center gap-2 text-body2 text-grey-7'):
+            for index, (label, href) in enumerate(breadcrumb_items):
+                if index > 0:
+                    ui.label('>')
+                if href:
+                    _crumb_link(label, href)
+                else:
+                    ui.label(label).classes('text-weight-medium text-black')
+        return
+
     clean = path.strip()
     if not clean.startswith('/'):
         clean = '/' + clean

@@ -11,6 +11,7 @@ from models import (
     ConditionChainRecord,
     ConditionCombinator,
     ConditionOperator,
+    ContextRecord,
     DecisionRecord,
     LinearCoefficientRecord,
     OutcomeRecord,
@@ -41,24 +42,77 @@ def list_decisions(session: Session) -> list[DecisionRecord]:
     return list(session.exec(select(DecisionRecord).order_by(DecisionRecord.id)))
 
 
-def get_decision(session: Session, decision_id: int) -> DecisionRecord | None:
-    return session.get(DecisionRecord, decision_id)
+def list_contexts(session: Session) -> list[ContextRecord]:
+    return list(session.exec(select(ContextRecord).order_by(ContextRecord.name, ContextRecord.id)))
 
 
-def create_decision(session: Session, name: str, description: str) -> DecisionRecord:
-    row = DecisionRecord(name=name, description=description)
+def get_context(session: Session, context_id: int) -> ContextRecord | None:
+    return session.get(ContextRecord, context_id)
+
+
+def create_context(session: Session, name: str) -> ContextRecord:
+    row = ContextRecord(name=name)
     session.add(row)
     session.commit()
     session.refresh(row)
     return row
 
 
-def update_decision(session: Session, decision_id: int, name: str, description: str) -> DecisionRecord:
+def delete_context(session: Session, context_id: int) -> None:
+    row = session.get(ContextRecord, context_id)
+    if row is None:
+        return
+
+    for decision in list(session.exec(select(DecisionRecord).order_by(DecisionRecord.id))):
+        if row in decision.contexts:
+            decision.contexts = [ctx for ctx in decision.contexts if ctx.id != context_id]
+            session.add(decision)
+
+    session.delete(row)
+    session.commit()
+
+
+def get_decision(session: Session, decision_id: int) -> DecisionRecord | None:
+    return session.get(DecisionRecord, decision_id)
+
+
+def create_decision(
+    session: Session,
+    name: str,
+    description: str,
+    context_ids: list[int] | None = None,
+) -> DecisionRecord:
+    row = DecisionRecord(name=name, description=description)
+    if context_ids:
+        contexts = list(
+            session.exec(select(ContextRecord).where(ContextRecord.id.in_(context_ids)))
+        )
+        row.contexts = contexts
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
+def update_decision(
+    session: Session,
+    decision_id: int,
+    name: str,
+    description: str,
+    context_ids: list[int] | None = None,
+) -> DecisionRecord:
     row = session.get(DecisionRecord, decision_id)
     if row is None:
         raise ValueError(f"Decision {decision_id} not found")
     row.name = name
     row.description = description
+    if context_ids:
+        contexts = list(
+            session.exec(select(ContextRecord).where(ContextRecord.id.in_(context_ids)))
+        )
+        row.contexts = contexts
+    else:
+        row.contexts = []
     session.add(row)
     session.commit()
     session.refresh(row)

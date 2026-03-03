@@ -30,6 +30,7 @@ from ui.views.adapter.predicate_list_view import render_predicate_list
 from ui.views.decision.decision_create_view import render_decision_create_view
 from ui.views.decision.decision_edit_view import render_decision_edit_view
 from ui.views.decision.decision_list_view import render_decision_list
+from ui.views.decision.decision_test_view import render_decision_test_view
 from ui.views.outcome.outcome_create_view import render_outcome_create_view
 from ui.views.outcome.outcome_edit_view import render_outcome_edit_view
 
@@ -56,12 +57,42 @@ def register_decision_pages(engine) -> None:
 
     @ui.page('/decisions/{decision_id}')
     def decision_edit(decision_id: int) -> None:
+        with Session(engine) as session:
+            decision = decision_repo.get_decision(session, decision_id)
+            decision_label = decision.name if decision else f'#{decision_id}'
         with page_shell(
             title='Edit Decision',
             breadcrumb_path=f'/decisions/{decision_id}',
             max_width_class='max-w-4xl',
+            breadcrumb_items=[
+                ('Home', '/'),
+                ('Decisions', '/decisions'),
+                (decision_label, None),
+            ],
         ):
             render_decision_edit_view(engine=engine, decision_id=decision_id, back_url='/decisions')
+
+    @ui.page('/decisions/{decision_id}/test')
+    def decision_test(decision_id: int) -> None:
+        with Session(engine) as session:
+            decision = decision_repo.get_decision(session, decision_id)
+            decision_label = decision.name if decision else f'#{decision_id}'
+        with page_shell(
+            title='Test Decision',
+            breadcrumb_path=f'/decisions/{decision_id}/test',
+            max_width_class='max-w-4xl',
+            breadcrumb_items=[
+                ('Home', '/'),
+                ('Decisions', '/decisions'),
+                (decision_label, f'/decisions/{decision_id}'),
+                ('Test', None),
+            ],
+        ):
+            render_decision_test_view(
+                engine=engine,
+                decision_id=decision_id,
+                back_url=f'/decisions/{decision_id}',
+            )
 
     @ui.page('/decisions/{decision_id}/outcomes/new')
     def outcome_create(decision_id: int) -> None:
@@ -202,15 +233,26 @@ def register_decision_pages(engine) -> None:
     @ui.page('/decisions/{decision_id}/adapters/{adapter_id}/edit')
     def adapter_edit(decision_id: int, adapter_id: int) -> None:
         with Session(engine) as session:
+            decision = decision_repo.get_decision(session, decision_id)
             adapter_set = session.get(AdapterSetRecord, adapter_id)
             outcome_options = _outcome_options(session, decision_id)
             effects = decision_repo.list_adapters(session, adapter_set_id=adapter_id)
+            decision_label = decision.name if decision else f'#{decision_id}'
+            adapter_label = adapter_set.name if adapter_set else f'#{adapter_id}'
+
+        breadcrumbs = [
+            ('Home', '/'),
+            ('Decisions', '/decisions'),
+            (decision_label, f'/decisions/{decision_id}'),
+            (adapter_label, None),
+        ]
 
         if adapter_set is None:
             with page_shell(
                 title='Edit Adapter Set',
                 breadcrumb_path=f'/decisions/{decision_id}/adapters/{adapter_id}/edit',
                 max_width_class='max-w-2xl',
+                breadcrumb_items=breadcrumbs,
             ):
                 ui.label('Adapter set not found.')
                 ui.button('Back', on_click=lambda: ui.navigate.to(f'/decisions/{decision_id}'))
@@ -220,6 +262,7 @@ def register_decision_pages(engine) -> None:
             title='Edit Adapter Set',
             breadcrumb_path=f'/decisions/{decision_id}/adapters/{adapter_id}/edit',
             max_width_class='max-w-3xl',
+            breadcrumb_items=breadcrumbs,
         ):
             _render_adapter_set_edit(engine, decision_id, adapter_set, effects, outcome_options)
 

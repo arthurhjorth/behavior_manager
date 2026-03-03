@@ -26,8 +26,9 @@ def render_outcome_list(
     if not outcomes:
         ui.label('No outcomes yet.')
     else:
-        for outcome in outcomes:
-            _render_outcome_row(outcome, on_edit, on_delete)
+        with ui.row().classes('w-full gap-2 flex-wrap'):
+            for outcome in outcomes:
+                _render_outcome_row(outcome, on_edit, on_delete)
 
     ui.button('Add Outcome', on_click=lambda: on_create(), color='primary').props('outline')
 
@@ -38,7 +39,7 @@ def _render_outcome_row(
     on_delete: Callable[[int], None],
 ) -> None:
     likelihood_label = '<unset>' if outcome.likelihood is None else f'{outcome.likelihood:.3f}'
-    with ui.row().classes('items-center justify-between w-full border rounded p-2'):
+    with ui.card().classes('min-w-[220px] p-2'):
         ui.label(f'{outcome.name}: {likelihood_label}')
         with ui.row().classes('gap-1'):
             ui.button('Edit', on_click=lambda oid=outcome.id: on_edit(int(oid))).props('flat')

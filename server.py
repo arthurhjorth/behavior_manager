@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 from nicegui import app, ui
 from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
-from models import create_study, get_engine, init_db, list_studies
+from models import Study, create_study, get_engine, init_db, list_studies
+from repositories import decision_repo, variable_repo
+from services import decision_service, variable_service
+from ui.components.confirm_actions import confirm_delete_button
 from ui.components.page_shell import page_shell
+from ui.pages.contexts_page import register_context_pages
 from ui.pages.decisions_page import register_decision_pages
 from ui.pages.variables_page import register_variable_pages
+from ui.views.adapter.adapter_list_view import render_adapter_list
+from ui.views.decision.decision_form_view import ContextOption, render_decision_form
 
 
 STUDIES_DIR = Path('studies')
@@ -18,6 +23,7 @@ init_db()
 ENGINE = get_engine()
 register_decision_pages(ENGINE)
 register_variable_pages(ENGINE)
+register_context_pages(ENGINE)
 
 
 def _pdf_files() -> list[Path]:
@@ -50,6 +56,7 @@ def index() -> None:
         ui.link('Go to studies', '/studies/')
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
+        ui.link('Go to contexts', '/contexts')
 
 
 @ui.page('/studies/')
@@ -68,10 +75,12 @@ def studies_page() -> None:
                 return
             with list_container:
                 for study in studies:
-                    if study.file_path:
-                        ui.label(f'{study.name} ({Path(study.file_path).name})')
-                    else:
-                        ui.label(study.name)
+                    with ui.row().classes('w-full items-center justify-between border rounded p-2'):
+                        if study.file_path:
+                            ui.label(f'{study.name} ({Path(study.file_path).name})')
+                        else:
+                            ui.label(study.name)
+                        ui.button('View', on_click=lambda sid=study.id: ui.navigate.to(f'/studies/{int(sid)}')).props('flat')
 
         async def handle_upload(event: UploadEventArguments) -> None:
             filename = Path(event.file.name).name
@@ -88,6 +97,202 @@ def studies_page() -> None:
 
         ui.upload(on_upload=handle_upload, auto_upload=True).props('accept=.pdf')
         render_list()
+
+
+@ui.page('/studies/{study_id}')
+def study_view(study_id: int) -> None:
+    with Session(ENGINE) as session:
+        study = session.get(Study, study_id)
+
+    breadcrumb_items = [
+        ('Home', '/'),
+        ('Studies', '/studies/'),
+        (study.name if study else f'#{study_id}', None),
+    ]
+    with page_shell(
+        title='View Study',
+        breadcrumb_path=f'/studies/{study_id}',
+        max_width_class='max-w-none',
+        breadcrumb_items=breadcrumb_items,
+    ):
+        if study is None:
+            ui.label('Study not found.')
+            ui.button('Back', on_click=lambda: ui.navigate.to('/studies/'))
+            return
+
+        if not study.file_path:
+            ui.label('Study has no file path.')
+            ui.button('Back', on_click=lambda: ui.navigate.to('/studies/'))
+            return
+
+        static_path = app.add_static_file(local_file=str(Path(study.file_path).resolve()))
+        with ui.row().classes('w-full items-start').style('gap: 1rem; flex-wrap: nowrap; align-items: flex-start;'):
+            with ui.column().classes('min-h-[82vh] border rounded p-2 gap-3').style('flex: 0 0 46%; max-width: 46%;'):
+                _render_study_workflow_column(study_id)
+            with ui.column().style('flex: 0 0 46%; max-width: 46%;'):
+                ui.element('embed').props(f'src={static_path} type=application/pdf').style('width:100%;height:82vh;')
+
+
+def _render_study_workflow_column(study_id: int) -> None:
+    ui.label('Build Decision').classes('text-h6')
+    ui.label('Create decisions, variables, and adapter sets while reading the study.').classes('text-caption text-grey-7')
+
+    with Session(ENGINE) as session:
+        contexts = decision_repo.list_contexts(session)
+        decisions = decision_repo.list_decisions(session)
+        agent_id, variables = variable_repo.list_variables(session, agent_id=None)
+
+    context_options = [
+        ContextOption(id=int(context.id), name=context.name)
+        for context in contexts
+        if context.id is not None
+    ]
+
+    with ui.expansion('Decision', value=True).classes('w-full'):
+        render_decision_form(
+            title='Create Decision',
+            initial_name='',
+            initial_description='',
+            context_options=context_options,
+            initial_context_ids=[],
+            on_submit=lambda name, description, context_ids: _create_decision_from_study(
+                study_id,
+                name,
+                description,
+                context_ids,
+            ),
+            on_cancel=lambda: ui.navigate.to(f'/studies/{study_id}'),
+        )
+
+        ui.separator()
+        ui.label('Existing decisions').classes('text-caption text-grey-7')
+        if not decisions:
+            ui.label('No decisions yet.').classes('text-body2')
+        else:
+            for decision in decisions:
+                with ui.row().classes('w-full items-center justify-between'):
+                    ui.label(decision.name).classes('text-body2')
+                    with ui.row().classes('gap-1'):
+                        ui.button('Open', on_click=lambda did=decision.id: ui.navigate.to(f'/decisions/{int(did)}')).props('flat')
+                        ui.button('Test', on_click=lambda did=decision.id: ui.navigate.to(f'/decisions/{int(did)}/test')).props('flat')
+
+    with ui.expansion('Variables', value=False).classes('w-full'):
+        name_input = ui.input('Variable name').classes('w-full')
+        type_select = ui.select(
+            {var_type.value: var_type.value for var_type in variable_service.VarType},
+            value=variable_service.VarType._float.value,
+            label='Type',
+        ).classes('w-full')
+        value_input = ui.input('Default value (optional)').classes('w-full')
+
+        def handle_add_variable() -> None:
+            name = (name_input.value or '').strip()
+            raw_type = str(type_select.value)
+            raw_value = str(value_input.value or '')
+            errors = variable_service.validate_variable_payload(name, '')
+            if errors:
+                for error in errors:
+                    ui.notify(error.message, color='negative')
+                return
+            try:
+                var_type = variable_service.parse_var_type(raw_type)
+                parsed_value = variable_service.parse_value(raw_value, var_type)
+            except Exception as exc:
+                ui.notify(str(exc), color='negative')
+                return
+            with Session(ENGINE) as session:
+                variable_repo.create_variable(
+                    session,
+                    agent_id=agent_id,
+                    name=name,
+                    var_type=var_type,
+                    value=parsed_value,
+                    is_observer=False,
+                    is_turtle=False,
+                    is_patch=False,
+                    is_link=False,
+                    breed='',
+                )
+            ui.notify('Variable created.', color='positive')
+            ui.navigate.to(f'/studies/{study_id}')
+
+        ui.button('Add Variable', on_click=handle_add_variable, color='primary').props('outline')
+        ui.separator()
+        if not variables:
+            ui.label('No variables yet.').classes('text-body2')
+        else:
+            for variable in variables:
+                value_text = variable_service.variable_value_to_string(variable) or '<unset>'
+                with ui.row().classes('w-full items-center justify-between border rounded p-2'):
+                    ui.label(f'{variable.name} [{variable.var_type.value}] = {value_text}').classes('text-body2')
+                    confirm_delete_button(
+                        label='Delete',
+                        item_name=f'variable "{variable.name}"',
+                        on_confirm=lambda vid=variable.id: _delete_variable_from_study(study_id, int(vid)),
+                    )
+
+    with ui.expansion('Adapters', value=True).classes('w-full'):
+        if not decisions:
+            ui.label('Create a decision first.').classes('text-body2')
+            return
+
+        decision_options = {int(decision.id): decision.name for decision in decisions if decision.id is not None}
+        initial_decision_id = next(iter(decision_options.keys()))
+        selected_decision = ui.select(decision_options, value=initial_decision_id, label='Decision').classes('w-full')
+        adapter_container = ui.column().classes('w-full gap-2')
+
+        def render_for_selected_decision() -> None:
+            adapter_container.clear()
+            decision_id = int(selected_decision.value)
+            with adapter_container:
+                with ui.row().classes('gap-2'):
+                    ui.button('Open Decision', on_click=lambda did=decision_id: ui.navigate.to(f'/decisions/{did}')).props('outline')
+                    ui.button('Add Outcome', on_click=lambda did=decision_id: ui.navigate.to(f'/decisions/{did}/outcomes/new')).props('outline')
+                render_adapter_list(
+                    engine=ENGINE,
+                    decision_id=decision_id,
+                    on_edit=lambda adapter_set_id, did=decision_id: ui.navigate.to(f'/decisions/{did}/adapters/{adapter_set_id}/edit'),
+                    on_create=lambda did=decision_id: ui.navigate.to(f'/decisions/{did}/adapters/new'),
+                    on_delete=lambda adapter_set_id, did=decision_id: _delete_adapter_set_from_study(
+                        study_id,
+                        did,
+                        adapter_set_id,
+                    ),
+                )
+
+        selected_decision.on('update:model-value', lambda _: render_for_selected_decision())
+        render_for_selected_decision()
+
+
+def _create_decision_from_study(study_id: int, name: str, description: str, context_ids: list[int]) -> None:
+    errors = decision_service.validate_decision_payload(name, description)
+    if errors:
+        for error in errors:
+            ui.notify(error.message, color='negative')
+        return
+    with Session(ENGINE) as session:
+        decision_repo.create_decision(
+            session,
+            name=name,
+            description=description,
+            context_ids=context_ids,
+        )
+    ui.notify('Decision created.', color='positive')
+    ui.navigate.to(f'/studies/{study_id}')
+
+
+def _delete_variable_from_study(study_id: int, variable_id: int) -> None:
+    with Session(ENGINE) as session:
+        variable_repo.delete_variable(session, variable_id)
+    ui.notify('Variable deleted.', color='positive')
+    ui.navigate.to(f'/studies/{study_id}')
+
+
+def _delete_adapter_set_from_study(study_id: int, _decision_id: int, adapter_set_id: int) -> None:
+    with Session(ENGINE) as session:
+        decision_repo.delete_adapter_set(session, adapter_set_id)
+    ui.notify('Adapter set deleted.', color='positive')
+    ui.navigate.to(f'/studies/{study_id}')
 
 
 if __name__ in {'__main__', '__mp_main__'}:

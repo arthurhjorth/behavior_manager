@@ -12,6 +12,7 @@ from models import (
     AdapterSetRecord,
     Agent,
     BinaryAdapter,
+    Context,
     Decision,
     LinearAdapter,
     Outcome,
@@ -178,6 +179,7 @@ def build_runtime_decision(session: Session, decision_id: int) -> Decision:
     return Decision(
         name=decision.name,
         description=decision.description,
+        contexts=[Context(name=context.name) for context in decision.contexts],
         outcomes=outcomes,
         adapters=adapters,
     )

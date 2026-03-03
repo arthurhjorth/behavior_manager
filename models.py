@@ -193,7 +193,7 @@ class BinaryAdapter(Adapter):
                 else:
                     likelihood *= self.multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
-        return _normalize_outcomes(updated)
+        return updated
 
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
@@ -244,7 +244,7 @@ class LinearAdapter(Adapter):
                 else:
                     likelihood *= multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
-        return _normalize_outcomes(updated)
+        return updated
 
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
@@ -263,11 +263,16 @@ class Outcome(SQLModel):
     likelihood: float
 
 
+class Context(SQLModel):
+    name: str
+
+
 class Decision(SQLModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str
     description: str
+    contexts: list[Context] = Field(default_factory=list)
     outcomes: Optional[list[Outcome]] = None
     adapters: Sequence[Adapter] = Field(default_factory=list)
 
@@ -289,6 +294,10 @@ class Agent(SQLModel):
         return True
 
     def run_decision(self, decision: Decision) -> list[Outcome]:
+        outcomes = self.run_decision_raw(decision)
+        return _normalize_outcomes(outcomes)
+
+    def run_decision_raw(self, decision: Decision) -> list[Outcome]:
         if not self.validate(decision):
             raise ValueError("Decision is invalid for this agent.")
 
@@ -296,7 +305,7 @@ class Agent(SQLModel):
         outcomes = [Outcome(name=o.name, likelihood=o.likelihood) for o in decision.outcomes]
         for adapter in decision.adapters:
             outcomes = adapter.modify(outcomes, self.my_variables)
-        return _normalize_outcomes(outcomes)
+        return outcomes
 
     def run_decision_with_odds_mode(self, decision: Decision) -> list[Outcome]:
         if not self.validate(decision):
@@ -384,6 +393,21 @@ class VariableRecord(SQLModel, table=True):
     predicates: list["PredicateRecord"] = Relationship(back_populates="variable")
 
 
+class DecisionContextLinkRecord(SQLModel, table=True):
+    decision_id: int = Field(foreign_key="decisionrecord.id", primary_key=True)
+    context_id: int = Field(foreign_key="contextrecord.id", primary_key=True)
+
+
+class ContextRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+
+    decisions: list["DecisionRecord"] = Relationship(
+        back_populates="contexts",
+        link_model=DecisionContextLinkRecord,
+    )
+
+
 class DecisionRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int | None = Field(default=None, foreign_key="agentrecord.id", index=True)
@@ -392,6 +416,10 @@ class DecisionRecord(SQLModel, table=True):
     description: str
 
     agent: AgentRecord | None = Relationship(back_populates="decisions")
+    contexts: list[ContextRecord] = Relationship(
+        back_populates="decisions",
+        link_model=DecisionContextLinkRecord,
+    )
     outcomes: list["OutcomeRecord"] = Relationship(back_populates="decision")
     adapter_sets: list["AdapterSetRecord"] = Relationship(back_populates="decision")
 
@@ -634,8 +662,14 @@ def create_decision_record(
     name: str,
     description: str,
     agent_id: int | None = None,
+    context_ids: list[int] | None = None,
 ) -> DecisionRecord:
     record = DecisionRecord(agent_id=agent_id, name=name, description=description)
+    if context_ids:
+        contexts = list(
+            session.exec(select(ContextRecord).where(ContextRecord.id.in_(context_ids)))
+        )
+        record.contexts = contexts
     session.add(record)
     session.commit()
     session.refresh(record)
