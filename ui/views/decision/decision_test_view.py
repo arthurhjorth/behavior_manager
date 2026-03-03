@@ -3,7 +3,16 @@ from __future__ import annotations
 from nicegui import ui
 from sqlmodel import Session
 
-from models import Agent, VarTable, VarType, VariableRecord
+from models import (
+    AdapterLikelihoodMode,
+    Agent,
+    BinaryAdapter,
+    LinearAdapter,
+    Outcome,
+    VarTable,
+    VarType,
+    VariableRecord,
+)
 from repositories import decision_repo
 from services import decision_service
 from ui.components.messages import show_errors
@@ -33,8 +42,6 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
                 control = ui.number(variable.name, value=_variable_default(variable), step=0.01).classes('w-full')
             variable_inputs[variable.name] = (variable.var_type, control)
 
-    results_container = ui.column().classes('w-full gap-2')
-
     def run_test() -> None:
         try:
             variable_values = _read_variable_values(variable_inputs)
@@ -48,28 +55,62 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
             table = VarTable()
             for name, (var_type, value) in variable_values.items():
                 table.add(name, var_type, value)
-            agent = Agent(my_variables=table)
-            raw_outcomes = agent.run_decision_raw(runtime)
-            outcomes = agent.run_decision(runtime)
+            current = _copy_outcomes(runtime.outcomes or [])
+            steps: list[dict] = []
+            for index, adapter in enumerate(runtime.adapters, start=1):
+                before = _copy_outcomes(current)
+                applied = _adapter_applies(adapter, table)
+                after = _copy_outcomes(adapter.modify(before, table))
+                steps.append(
+                    {
+                        'index': index,
+                        'label': _adapter_label(adapter),
+                        'applied': applied,
+                        'before': before,
+                        'after': after,
+                    }
+                )
+                current = after
+            final_raw = _copy_outcomes(current)
+            final_probs = _probabilities(final_raw)
         except Exception as exc:
             show_errors([f'Could not run decision: {exc}'])
             return
 
-        probabilities_by_name = {outcome.name: float(outcome.likelihood) for outcome in outcomes}
         results_container.clear()
         with results_container:
-            ui.label('Results').classes('text-h6')
-            for outcome in raw_outcomes:
-                probability = max(0.0, probabilities_by_name.get(outcome.name, 0.0))
+            ui.label('Final Results').classes('text-h6')
+            for outcome in final_raw:
+                probability = max(0.0, final_probs.get(outcome.name, 0.0))
                 percent = probability * 100.0
-                odds = _odds_value(float(outcome.likelihood))
+                odds = _weight_value(float(outcome.likelihood))
                 with ui.row().classes('w-full items-center justify-between border rounded p-2'):
                     ui.label(outcome.name).classes('text-body1')
                     ui.label(f'Odds: {odds} | Probability: {percent:.2f}%').classes('text-body2 text-grey-8')
 
+            ui.separator()
+            ui.label('Execution Trace').classes('text-h6')
+
+            baseline_probs = _probabilities(runtime.outcomes or [])
+            with ui.column().classes('w-full border rounded p-2 gap-1'):
+                ui.label('Step 0: Baseline').classes('text-body1 text-weight-medium')
+                _render_outcome_changes(runtime.outcomes or [], runtime.outcomes or [], baseline_probs, baseline_probs)
+
+            for step in steps:
+                before_probs = _probabilities(step['before'])
+                after_probs = _probabilities(step['after'])
+                with ui.column().classes('w-full border rounded p-2 gap-1'):
+                    status = 'applied' if step['applied'] else 'skipped'
+                    status_color = 'text-positive' if step['applied'] else 'text-grey-7'
+                    ui.label(f"Step {step['index']}: {step['label']}").classes('text-body1 text-weight-medium')
+                    ui.label(status).classes(f'text-caption {status_color}')
+                    _render_outcome_changes(step['before'], step['after'], before_probs, after_probs)
+
     with ui.row().classes('gap-2'):
         ui.button('Run Test', on_click=run_test, color='primary')
         ui.button('Back', on_click=lambda: ui.navigate.to(back_url))
+
+    results_container = ui.column().classes('w-full gap-2')
 
     run_test()
 
@@ -115,5 +156,80 @@ def _read_variable_values(variable_inputs: dict[str, tuple[VarType, object]]) ->
     return values
 
 
-def _odds_value(weight: float) -> str:
+def _weight_value(weight: float) -> str:
     return f'{weight:.3f}'
+
+
+def _copy_outcomes(outcomes: list[Outcome]) -> list[Outcome]:
+    return [Outcome(name=outcome.name, likelihood=float(outcome.likelihood)) for outcome in outcomes]
+
+
+def _probabilities(outcomes: list[Outcome]) -> dict[str, float]:
+    if not outcomes:
+        return {}
+    clipped = {outcome.name: max(0.0, float(outcome.likelihood)) for outcome in outcomes}
+    total = sum(clipped.values())
+    if total == 0.0:
+        uniform = 1.0 / len(outcomes)
+        return {outcome.name: uniform for outcome in outcomes}
+    return {name: value / total for name, value in clipped.items()}
+
+
+def _adapter_applies(adapter, table: VarTable) -> bool:
+    try:
+        return all(fn(table) for fn in adapter.funcs) if adapter.funcs else True
+    except Exception:
+        return False
+
+
+def _adapter_label(adapter) -> str:
+    if isinstance(adapter, BinaryAdapter):
+        if adapter.likelihood_mode == AdapterLikelihoodMode.set:
+            value = '<unset>' if adapter.set_likelihood is None else str(adapter.set_likelihood)
+            return f'set {adapter.target_outcome} {value}'
+        if adapter.likelihood_mode == AdapterLikelihoodMode.add_points:
+            value = '<unset>' if adapter.add_points is None else str(adapter.add_points)
+            return f'add {adapter.target_outcome} by {value} %-pts'
+        if adapter.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            return f'multiply probability of {adapter.target_outcome} by {adapter.multiplier}'
+        return f'multiply {adapter.target_outcome} by {adapter.multiplier}'
+
+    if isinstance(adapter, LinearAdapter):
+        formula = (
+            f'linear(intercept={adapter.intercept}, '
+            f'min={adapter.min_multiplier}, '
+            f'max={adapter.max_multiplier if adapter.max_multiplier is not None else "none"})'
+        )
+        if adapter.likelihood_mode == AdapterLikelihoodMode.set:
+            return f'set {adapter.target_outcome} {formula}'
+        if adapter.likelihood_mode == AdapterLikelihoodMode.add_points:
+            return f'add {adapter.target_outcome} by {formula} %-pts'
+        if adapter.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            return f'multiply probability of {adapter.target_outcome} by {formula}'
+        return f'multiply {adapter.target_outcome} by {formula}'
+
+    return 'adapter'
+
+
+def _render_outcome_changes(
+    before: list[Outcome],
+    after: list[Outcome],
+    before_probs: dict[str, float],
+    after_probs: dict[str, float],
+) -> None:
+    after_by_name = {outcome.name: outcome for outcome in after}
+    for before_outcome in before:
+        after_outcome = after_by_name.get(before_outcome.name, before_outcome)
+        before_weight = float(before_outcome.likelihood)
+        after_weight = float(after_outcome.likelihood)
+        before_percent = before_probs.get(before_outcome.name, 0.0) * 100.0
+        after_percent = after_probs.get(before_outcome.name, 0.0) * 100.0
+        delta = after_percent - before_percent
+        delta_prefix = '+' if delta >= 0 else ''
+        with ui.row().classes('w-full items-center justify-between'):
+            ui.label(before_outcome.name).classes('text-body2')
+            ui.label(
+                f'{before_weight:.3f} ({before_percent:.2f}%) -> '
+                f'{after_weight:.3f} ({after_percent:.2f}%) '
+                f'[{delta_prefix}{delta:.2f} pts]'
+            ).classes('text-caption text-grey-8')
