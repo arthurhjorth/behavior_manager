@@ -278,6 +278,7 @@ def create_binary_adapter(
     multiplier: float = 1.0,
     likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply,
     set_likelihood: float | None = None,
+    add_points: float | None = None,
     order_index: int = 0,
 ) -> AdapterRecord:
     resolved_set_id = _resolve_adapter_set_id(session, decision_id=decision_id, adapter_set_id=adapter_set_id)
@@ -288,6 +289,7 @@ def create_binary_adapter(
         likelihood_mode=likelihood_mode,
         multiplier=multiplier,
         set_likelihood=set_likelihood,
+        add_points=add_points,
         order_index=order_index,
     )
     session.add(row)
@@ -331,6 +333,7 @@ def update_binary_adapter(
     multiplier: float,
     likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply,
     set_likelihood: float | None = None,
+    add_points: float | None = None,
     order_index: int = 0,
 ) -> AdapterRecord:
     row = session.get(AdapterRecord, adapter_id)
@@ -341,6 +344,7 @@ def update_binary_adapter(
     row.likelihood_mode = likelihood_mode
     row.multiplier = multiplier
     row.set_likelihood = set_likelihood
+    row.add_points = add_points
     row.intercept = None
     row.min_multiplier = None
     row.max_multiplier = None
@@ -369,6 +373,7 @@ def update_linear_adapter(
     row.likelihood_mode = likelihood_mode
     row.multiplier = None
     row.set_likelihood = None
+    row.add_points = None
     row.intercept = intercept
     row.min_multiplier = min_multiplier
     row.max_multiplier = max_multiplier

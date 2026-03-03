@@ -170,6 +170,8 @@ class AdapterEffect(SQLModel):
 class AdapterLikelihoodMode(str, Enum):
     multiply = "multiply"
     set = "set"
+    add_points = "add_points"
+    probability_multiply = "probability_multiply"
 
 
 class BinaryAdapter(Adapter):
@@ -177,10 +179,16 @@ class BinaryAdapter(Adapter):
     multiplier: float = 1.0
     likelihood_mode: AdapterLikelihoodMode = AdapterLikelihoodMode.multiply
     set_likelihood: float | None = None
+    add_points: float | None = None
 
     def modify(self, outcomes: list["Outcome"], variables: VarTable) -> list["Outcome"]:
         if any(not func(variables) for func in self.funcs):
             return outcomes
+
+        if self.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            if self.multiplier < 0.0:
+                raise ValueError("BinaryAdapter multiplier must be >= 0 for probability_multiply mode.")
+            return _apply_probability_multiply(outcomes, self.target_outcome, self.multiplier)
 
         updated: list[Outcome] = []
         for outcome in outcomes:
@@ -190,6 +198,10 @@ class BinaryAdapter(Adapter):
                     if self.set_likelihood is None:
                         raise ValueError("BinaryAdapter set_likelihood is required when likelihood_mode='set'.")
                     likelihood = self.set_likelihood
+                elif self.likelihood_mode == AdapterLikelihoodMode.add_points:
+                    if self.add_points is None:
+                        raise ValueError("BinaryAdapter add_points is required when likelihood_mode='add_points'.")
+                    likelihood += self.add_points
                 else:
                     likelihood *= self.multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
@@ -198,8 +210,14 @@ class BinaryAdapter(Adapter):
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
             return AdapterEffect()
-        if self.likelihood_mode == AdapterLikelihoodMode.set:
-            raise ValueError("BinaryAdapter odds mode does not support likelihood_mode='set'.")
+        if self.likelihood_mode in {
+            AdapterLikelihoodMode.set,
+            AdapterLikelihoodMode.add_points,
+            AdapterLikelihoodMode.probability_multiply,
+        }:
+            raise ValueError(
+                f"BinaryAdapter odds mode does not support likelihood_mode='{self.likelihood_mode.value}'."
+            )
         if self.multiplier <= 0.0:
             raise ValueError("BinaryAdapter multiplier must be > 0 for odds mode.")
         return AdapterEffect(logit_delta_by_outcome={self.target_outcome: math.log(self.multiplier)})
@@ -234,6 +252,10 @@ class LinearAdapter(Adapter):
             return outcomes
 
         multiplier = self._compute_multiplier(variables)
+        if self.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            if multiplier < 0.0:
+                raise ValueError("LinearAdapter multiplier must be >= 0 for probability_multiply mode.")
+            return _apply_probability_multiply(outcomes, self.target_outcome, multiplier)
 
         updated: list[Outcome] = []
         for outcome in outcomes:
@@ -241,6 +263,8 @@ class LinearAdapter(Adapter):
             if outcome.name == self.target_outcome:
                 if self.likelihood_mode == AdapterLikelihoodMode.set:
                     likelihood = multiplier
+                elif self.likelihood_mode == AdapterLikelihoodMode.add_points:
+                    likelihood += multiplier
                 else:
                     likelihood *= multiplier
             updated.append(Outcome(name=outcome.name, likelihood=likelihood))
@@ -249,8 +273,14 @@ class LinearAdapter(Adapter):
     def odds_effect(self, outcomes: list["Outcome"], variables: VarTable) -> AdapterEffect:
         if any(not func(variables) for func in self.funcs):
             return AdapterEffect()
-        if self.likelihood_mode == AdapterLikelihoodMode.set:
-            raise ValueError("LinearAdapter odds mode does not support likelihood_mode='set'.")
+        if self.likelihood_mode in {
+            AdapterLikelihoodMode.set,
+            AdapterLikelihoodMode.add_points,
+            AdapterLikelihoodMode.probability_multiply,
+        }:
+            raise ValueError(
+                f"LinearAdapter odds mode does not support likelihood_mode='{self.likelihood_mode.value}'."
+            )
 
         multiplier = self._compute_multiplier(variables)
         if multiplier <= 0.0:
@@ -460,6 +490,7 @@ class AdapterRecord(SQLModel, table=True):
 
     multiplier: float | None = None
     set_likelihood: float | None = None
+    add_points: float | None = None
     intercept: float | None = None
     min_multiplier: float | None = None
     max_multiplier: float | None = None
@@ -703,3 +734,29 @@ def _normalize_outcomes(outcomes: list[Outcome]) -> list[Outcome]:
         clipped = max(0.0, outcome.likelihood)
         normalized.append(Outcome(name=outcome.name, likelihood=clipped / total))
     return normalized
+
+
+def _apply_probability_multiply(outcomes: list[Outcome], target_outcome: str, factor: float) -> list[Outcome]:
+    probs = _normalize_outcomes(outcomes)
+    target_prob = next((outcome.likelihood for outcome in probs if outcome.name == target_outcome), None)
+    if target_prob is None:
+        return outcomes
+
+    new_target_prob = min(1.0, max(0.0, target_prob * factor))
+    remaining_old = max(0.0, 1.0 - target_prob)
+    remaining_new = max(0.0, 1.0 - new_target_prob)
+
+    if remaining_old == 0.0:
+        return [
+            Outcome(name=outcome.name, likelihood=(1.0 if outcome.name == target_outcome else 0.0))
+            for outcome in probs
+        ]
+
+    updated: list[Outcome] = []
+    for outcome in probs:
+        if outcome.name == target_outcome:
+            updated.append(Outcome(name=outcome.name, likelihood=new_target_prob))
+            continue
+        share = outcome.likelihood / remaining_old
+        updated.append(Outcome(name=outcome.name, likelihood=share * remaining_new))
+    return updated

@@ -142,12 +142,14 @@ def register_decision_pages(engine) -> None:
             multiplier: float,
             likelihood_mode: AdapterLikelihoodMode,
             set_likelihood: float | None,
+            add_points: float | None,
         ) -> None:
             errors = decision_service.validate_binary_adapter_payload(
                 target_outcome_id,
                 multiplier,
                 likelihood_mode,
                 set_likelihood,
+                add_points,
             )
             if errors:
                 show_errors(err.message for err in errors)
@@ -160,6 +162,7 @@ def register_decision_pages(engine) -> None:
                     multiplier=multiplier,
                     likelihood_mode=likelihood_mode,
                     set_likelihood=set_likelihood,
+                    add_points=add_points,
                 )
             ui.navigate.to(f'/decisions/{decision_id}')
 
@@ -175,6 +178,7 @@ def register_decision_pages(engine) -> None:
                 initial_multiplier=1.0,
                 initial_likelihood_mode=AdapterLikelihoodMode.multiply,
                 initial_set_likelihood=None,
+                initial_add_points=None,
                 on_submit=handle_submit,
                 on_cancel=lambda: ui.navigate.to(f'/decisions/{decision_id}'),
             )
@@ -276,12 +280,14 @@ def register_decision_pages(engine) -> None:
             multiplier: float,
             likelihood_mode: AdapterLikelihoodMode,
             set_likelihood: float | None,
+            add_points: float | None,
         ) -> None:
             errors = decision_service.validate_binary_adapter_payload(
                 target_outcome_id,
                 multiplier,
                 likelihood_mode,
                 set_likelihood,
+                add_points,
             )
             if errors:
                 show_errors(err.message for err in errors)
@@ -294,6 +300,7 @@ def register_decision_pages(engine) -> None:
                     multiplier=multiplier,
                     likelihood_mode=likelihood_mode,
                     set_likelihood=set_likelihood,
+                    add_points=add_points,
                 )
             ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_id}/edit')
 
@@ -309,6 +316,7 @@ def register_decision_pages(engine) -> None:
                 initial_multiplier=1.0,
                 initial_likelihood_mode=AdapterLikelihoodMode.multiply,
                 initial_set_likelihood=None,
+                initial_add_points=None,
                 on_submit=handle_submit,
                 on_cancel=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_id}/edit'),
             )
@@ -884,12 +892,14 @@ def _render_binary_adapter_edit(
         multiplier: float,
         likelihood_mode: AdapterLikelihoodMode,
         set_likelihood: float | None,
+        add_points: float | None,
     ) -> None:
         errors = decision_service.validate_binary_adapter_payload(
             target_outcome_id,
             multiplier,
             likelihood_mode,
             set_likelihood,
+            add_points,
         )
         if errors:
             show_errors(err.message for err in errors)
@@ -902,6 +912,7 @@ def _render_binary_adapter_edit(
                 multiplier=multiplier,
                 likelihood_mode=likelihood_mode,
                 set_likelihood=set_likelihood,
+                add_points=add_points,
             )
         ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set_id}/effects/{adapter.id}/edit')
 
@@ -912,6 +923,7 @@ def _render_binary_adapter_edit(
         initial_multiplier=adapter.multiplier or 1.0,
         initial_likelihood_mode=adapter.likelihood_mode,
         initial_set_likelihood=adapter.set_likelihood,
+        initial_add_points=adapter.add_points,
         on_submit=handle_submit,
         on_cancel=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set_id}/edit'),
     )
@@ -1030,11 +1042,21 @@ def _effect_summary_text(effect: AdapterRecord, target_label: str) -> str:
         if effect.likelihood_mode == AdapterLikelihoodMode.set:
             value = effect.set_likelihood if effect.set_likelihood is not None else '<unset>'
             return f'set {target_label} {value}'
+        if effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+            value = effect.add_points if effect.add_points is not None else '<unset>'
+            return f'add {target_label} by {value} %-pts'
+        if effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            value = effect.multiplier if effect.multiplier is not None else '<unset>'
+            return f'multiply probability of {target_label} by {value}'
         value = effect.multiplier if effect.multiplier is not None else '<unset>'
         return f'multiply {target_label} by {value}'
 
     if effect.likelihood_mode == AdapterLikelihoodMode.set:
         return f'set {target_label} { _linear_value_summary(effect) }'
+    if effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+        return f'add {target_label} by { _linear_value_summary(effect) } %-pts'
+    if effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+        return f'multiply probability of {target_label} by { _linear_value_summary(effect) }'
     return f'multiply {target_label} by { _linear_value_summary(effect) }'
 
 

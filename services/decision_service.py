@@ -49,17 +49,22 @@ def validate_binary_adapter_payload(
     multiplier: float,
     likelihood_mode: AdapterLikelihoodMode,
     set_likelihood: float | None,
+    add_points: float | None,
 ) -> list[ValidationError]:
     errors: list[ValidationError] = []
     if target_outcome_id is None:
         errors.append(ValidationError("Target outcome is required."))
     if likelihood_mode == AdapterLikelihoodMode.multiply and multiplier <= 0:
         errors.append(ValidationError("Multiplier must be > 0."))
+    if likelihood_mode == AdapterLikelihoodMode.probability_multiply and multiplier < 0:
+        errors.append(ValidationError("Probability multiplier must be >= 0."))
     if likelihood_mode == AdapterLikelihoodMode.set:
         if set_likelihood is None:
             errors.append(ValidationError("Set likelihood is required in set mode."))
         elif set_likelihood < 0:
             errors.append(ValidationError("Set likelihood must be >= 0."))
+    if likelihood_mode == AdapterLikelihoodMode.add_points and add_points is None:
+        errors.append(ValidationError("Add %-pts is required in add_points mode."))
     return errors
 
 
@@ -77,6 +82,8 @@ def validate_linear_adapter_payload(
         errors.append(ValidationError("max_multiplier must be >= min_multiplier."))
     if likelihood_mode == AdapterLikelihoodMode.multiply and intercept < 0 and min_multiplier < 0:
         errors.append(ValidationError("At least one lower bound should keep multiplier non-negative."))
+    if likelihood_mode == AdapterLikelihoodMode.probability_multiply and max_multiplier is not None and max_multiplier < 0:
+        errors.append(ValidationError("In probability_multiply mode, max multiplier must be >= 0."))
     return errors
 
 
@@ -153,6 +160,7 @@ def build_runtime_decision(session: Session, decision_id: int) -> Decision:
                         multiplier=adapter_row.multiplier or 1.0,
                         likelihood_mode=adapter_row.likelihood_mode,
                         set_likelihood=adapter_row.set_likelihood,
+                        add_points=adapter_row.add_points,
                         funcs=set_funcs,
                     )
                 )

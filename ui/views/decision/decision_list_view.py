@@ -157,6 +157,12 @@ def _set_effect_text(effects, outcome_names: dict[int, str]) -> str:
             if effect.likelihood_mode == AdapterLikelihoodMode.set:
                 value = effect.set_likelihood if effect.set_likelihood is not None else '<unset>'
                 bits.append(f'set {target} {value}')
+            elif effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+                value = effect.add_points if effect.add_points is not None else '<unset>'
+                bits.append(f'add {target} by {value} %-pts')
+            elif effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+                value = effect.multiplier if effect.multiplier is not None else '<unset>'
+                bits.append(f'multiply probability of {target} by {value}')
             else:
                 value = effect.multiplier if effect.multiplier is not None else '<unset>'
                 bits.append(f'multiply {target} by {value}')
@@ -164,6 +170,10 @@ def _set_effect_text(effects, outcome_names: dict[int, str]) -> str:
 
         if effect.likelihood_mode == AdapterLikelihoodMode.set:
             bits.append(f'set {target} {_linear_summary(effect)}')
+        elif effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+            bits.append(f'add {target} by {_linear_summary(effect)} %-pts')
+        elif effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            bits.append(f'multiply probability of {target} by {_linear_summary(effect)}')
         else:
             bits.append(f'multiply {target} by {_linear_summary(effect)}')
     return '; '.join(bits)

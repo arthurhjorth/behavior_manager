@@ -5,7 +5,16 @@ from nicegui import app, ui
 from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
-from models import Study, create_study, get_engine, init_db, list_studies
+from models import (
+    AdapterLikelihoodMode,
+    ConditionOperator,
+    Study,
+    VarType,
+    create_study,
+    get_engine,
+    init_db,
+    list_studies,
+)
 from repositories import decision_repo, variable_repo
 from services import decision_service, variable_service
 from ui.components.confirm_actions import confirm_delete_button
@@ -24,6 +33,235 @@ ENGINE = get_engine()
 register_decision_pages(ENGINE)
 register_variable_pages(ENGINE)
 register_context_pages(ENGINE)
+
+
+def _seed_baseline_decision() -> None:
+    with Session(ENGINE) as session:
+        existing = [d for d in decision_repo.list_decisions(session) if d.name == 'choose burger type in cafeteria']
+        if not existing:
+            decision = decision_repo.create_decision(
+                session,
+                name='choose burger type in cafeteria',
+                description='Seeded baseline cafeteria burger choice.',
+                context_ids=[],
+            )
+
+            agent = decision_repo.ensure_agent(session)
+            variables_by_name = {
+                variable.name: variable
+                for variable in decision_repo.list_variables(session, agent_id=int(agent.id))
+            }
+
+            reducer_var = variables_by_name.get('reducer')
+            if reducer_var is None:
+                reducer_var = variable_repo.create_variable(
+                    session,
+                    agent_id=int(agent.id),
+                    name='reducer',
+                    var_type=VarType._bool,
+                    value=None,
+                    is_observer=False,
+                    is_turtle=False,
+                    is_patch=False,
+                    is_link=False,
+                    breed='',
+                )
+
+            vegetarian_default_var = variables_by_name.get('vegetarian default')
+            if vegetarian_default_var is None:
+                vegetarian_default_var = variable_repo.create_variable(
+                    session,
+                    agent_id=int(agent.id),
+                    name='vegetarian default',
+                    var_type=VarType._bool,
+                    value=None,
+                    is_observer=False,
+                    is_turtle=False,
+                    is_patch=False,
+                    is_link=False,
+                    breed='',
+                )
+
+            meat = decision_repo.create_outcome(session, int(decision.id), 'meat', likelihood=None)
+            veggy = decision_repo.create_outcome(session, int(decision.id), 'veggy', likelihood=None)
+
+            # if reducer eq false then set meat 977; set veggy 23
+            set_a = decision_repo.create_adapter_set(
+                session,
+                decision_id=int(decision.id),
+                name='baseline reducer false',
+                order_index=0,
+            )
+            chain_a = decision_repo.ensure_default_chain(session, int(set_a.id))
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_a.id),
+                variable_id=int(reducer_var.id),
+                operator=ConditionOperator.eq,
+                value_bool=False,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_a.id),
+                target_outcome_id=int(meat.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=977.0,
+                order_index=0,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_a.id),
+                target_outcome_id=int(veggy.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=23.0,
+                order_index=1,
+            )
+
+            # if reducer eq true then set meat 667; set veggy 333
+            set_b = decision_repo.create_adapter_set(
+                session,
+                decision_id=int(decision.id),
+                name='baseline reducer true',
+                order_index=1,
+            )
+            chain_b = decision_repo.ensure_default_chain(session, int(set_b.id))
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_b.id),
+                variable_id=int(reducer_var.id),
+                operator=ConditionOperator.eq,
+                value_bool=True,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_b.id),
+                target_outcome_id=int(meat.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=667.0,
+                order_index=0,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_b.id),
+                target_outcome_id=int(veggy.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=333.0,
+                order_index=1,
+            )
+
+            # if reducer eq true AND vegetarian default eq true then multiply probability of veggy by 1.589
+            set_c = decision_repo.create_adapter_set(
+                session,
+                decision_id=int(decision.id),
+                name='baseline veggy boost reduced',
+                order_index=2,
+            )
+            chain_c = decision_repo.ensure_default_chain(session, int(set_c.id))
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_c.id),
+                variable_id=int(reducer_var.id),
+                operator=ConditionOperator.eq,
+                value_bool=True,
+                order_index=0,
+            )
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_c.id),
+                variable_id=int(vegetarian_default_var.id),
+                operator=ConditionOperator.eq,
+                value_bool=True,
+                order_index=1,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_c.id),
+                target_outcome_id=int(veggy.id),
+                multiplier=1.589,
+                likelihood_mode=AdapterLikelihoodMode.probability_multiply,
+                set_likelihood=None,
+                order_index=0,
+            )
+
+            # if reducer ne true AND vegetarian default eq true then multiply probability of veggy by 6.13
+            set_d = decision_repo.create_adapter_set(
+                session,
+                decision_id=int(decision.id),
+                name='baseline veggy boost non-reduced',
+                order_index=3,
+            )
+            chain_d = decision_repo.ensure_default_chain(session, int(set_d.id))
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_d.id),
+                variable_id=int(reducer_var.id),
+                operator=ConditionOperator.ne,
+                value_bool=True,
+                order_index=0,
+            )
+            decision_repo.create_predicate(
+                session,
+                chain_id=int(chain_d.id),
+                variable_id=int(vegetarian_default_var.id),
+                operator=ConditionOperator.eq,
+                value_bool=True,
+                order_index=1,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=int(set_d.id),
+                target_outcome_id=int(veggy.id),
+                multiplier=6.13,
+                likelihood_mode=AdapterLikelihoodMode.probability_multiply,
+                set_likelihood=None,
+                order_index=0,
+            )
+
+        existing_lunch = [d for d in decision_repo.list_decisions(session) if d.name == 'choose lunch at work cafeteria']
+        if not existing_lunch:
+            decision = decision_repo.create_decision(
+                session,
+                name='choose lunch at work cafeteria',
+                description='Seeded baseline lunch choice at work.',
+                context_ids=[],
+            )
+
+            meat = decision_repo.create_outcome(session, int(decision.id), 'meat', likelihood=None)
+            vegetarian = decision_repo.create_outcome(session, int(decision.id), 'vegetarian', likelihood=None)
+
+            baseline_set = decision_repo.create_adapter_set(
+                session,
+                decision_id=int(decision.id),
+                name='baseline',
+                order_index=0,
+            )
+            baseline_set_id = int(baseline_set.id)
+
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=baseline_set_id,
+                target_outcome_id=int(meat.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=9.0,
+                order_index=0,
+            )
+            decision_repo.create_binary_adapter(
+                session,
+                adapter_set_id=baseline_set_id,
+                target_outcome_id=int(vegetarian.id),
+                multiplier=1.0,
+                likelihood_mode=AdapterLikelihoodMode.set,
+                set_likelihood=1.0,
+                order_index=1,
+            )
+
+
+_seed_baseline_decision()
 
 
 def _pdf_files() -> list[Path]:
