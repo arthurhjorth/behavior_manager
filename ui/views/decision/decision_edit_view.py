@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from nicegui import ui
 from sqlmodel import Session
 
 from repositories import decision_repo
-from services import decision_service
+from services import decision_service, netlogo_export_service
 from ui.components.messages import show_errors
 from ui.views.adapter.adapter_list_view import render_adapter_list
 from ui.views.decision.decision_form_view import ContextOption, render_decision_form
@@ -33,6 +35,7 @@ def render_decision_edit_view(*, engine, decision_id: int, back_url: str) -> Non
 
     with ui.column().classes('w-full gap-4'):
         with ui.row().classes('justify-end w-full gap-2'):
+            ui.button('Export NetLogo', on_click=lambda: _show_netlogo_export(engine, decision_id)).props('outline')
             ui.button('Test Decision', on_click=lambda: ui.navigate.to(f'/decisions/{decision_id}/test')).props('outline')
             confirm_delete_button(
                 label='Delete Decision',
@@ -104,3 +107,23 @@ def _delete_adapter_set(engine, decision_id: int, adapter_set_id: int) -> None:
         decision_repo.delete_adapter_set(session, adapter_set_id)
     ui.notify('Adapter set deleted.', color='positive')
     ui.navigate.to(f'/decisions/{decision_id}')
+
+
+def _show_netlogo_export(engine, decision_id: int) -> None:
+    try:
+        with Session(engine) as session:
+            code = netlogo_export_service.export_decision_reporter(session, decision_id)
+    except Exception as exc:
+        ui.notify(f'Could not export NetLogo: {exc}', color='negative')
+        return
+
+    with ui.dialog() as dialog, ui.card().classes('w-[90vw] max-w-5xl'):
+        ui.label('NetLogo Reporter').classes('text-h6')
+        code_area = ui.textarea(value=code).props('readonly').classes('w-full').style('min-height: 60vh;')
+        with ui.row().classes('justify-end w-full gap-2'):
+            ui.button(
+                'Copy',
+                on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText({json.dumps(str(code_area.value))});'),
+            ).props('outline')
+            ui.button('Close', on_click=dialog.close).props('outline')
+    dialog.open()

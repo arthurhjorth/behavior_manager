@@ -20,6 +20,7 @@ from services import decision_service, variable_service
 from ui.components.confirm_actions import confirm_delete_button
 from ui.components.page_shell import page_shell
 from ui.pages.contexts_page import register_context_pages
+from ui.pages.datasets_page import register_dataset_pages
 from ui.pages.decisions_page import register_decision_pages
 from ui.pages.variables_page import register_variable_pages
 from ui.views.adapter.adapter_list_view import render_adapter_list
@@ -33,6 +34,7 @@ ENGINE = get_engine()
 register_decision_pages(ENGINE)
 register_variable_pages(ENGINE)
 register_context_pages(ENGINE)
+register_dataset_pages(ENGINE)
 
 
 def _seed_baseline_decision() -> None:
@@ -295,6 +297,7 @@ def index() -> None:
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
         ui.link('Go to contexts', '/contexts')
+        ui.link('Go to datasets', '/datasets')
 
 
 @ui.page('/studies/')

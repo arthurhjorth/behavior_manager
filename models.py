@@ -5,6 +5,7 @@ import math
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 from pydantic import ConfigDict
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel, Session, create_engine, select
 
 
@@ -479,6 +480,13 @@ class ConditionOperator(str, Enum):
     lte = "lte"
 
 
+class DatasetFieldType(str, Enum):
+    _int = "int"
+    _float = "float"
+    _bool = "bool"
+    _string = "string"
+
+
 class AdapterRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     adapter_set_id: int = Field(foreign_key="adaptersetrecord.id", index=True)
@@ -550,6 +558,60 @@ class PredicateRecord(SQLModel, table=True):
 
     chain: ConditionChainRecord | None = Relationship(back_populates="predicates")
     variable: VariableRecord | None = Relationship(back_populates="predicates")
+
+
+class DatasetRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, sa_column_kwargs={"unique": True})
+
+    fields: list["DatasetFieldRecord"] = Relationship(back_populates="dataset")
+    datapoints: list["DatapointRecord"] = Relationship(back_populates="dataset")
+
+
+class DatasetFieldRecord(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "name", name="uq_dataset_field_name"),
+        UniqueConstraint("dataset_id", "order_index", name="uq_dataset_field_order"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    dataset_id: int = Field(foreign_key="datasetrecord.id", index=True)
+
+    name: str
+    field_type: DatasetFieldType
+    order_index: int = 0
+
+    default_int: int | None = None
+    default_float: float | None = None
+    default_bool: bool | None = None
+    default_string: str | None = None
+
+    dataset: DatasetRecord | None = Relationship(back_populates="fields")
+    datapoint_values: list["DatapointValueRecord"] = Relationship(back_populates="field")
+
+
+class DatapointRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    dataset_id: int = Field(foreign_key="datasetrecord.id", index=True)
+
+    dataset: DatasetRecord | None = Relationship(back_populates="datapoints")
+    values: list["DatapointValueRecord"] = Relationship(back_populates="datapoint")
+
+
+class DatapointValueRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("datapoint_id", "field_id", name="uq_datapoint_field_value"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    datapoint_id: int = Field(foreign_key="datapointrecord.id", index=True)
+    field_id: int = Field(foreign_key="datasetfieldrecord.id", index=True)
+
+    value_int: int | None = None
+    value_float: float | None = None
+    value_bool: bool | None = None
+    value_string: str | None = None
+
+    datapoint: DatapointRecord | None = Relationship(back_populates="values")
+    field: DatasetFieldRecord | None = Relationship(back_populates="datapoint_values")
 
 
 # Domain aliases using requested terminology.
@@ -734,6 +796,54 @@ def _normalize_outcomes(outcomes: list[Outcome]) -> list[Outcome]:
         clipped = max(0.0, outcome.likelihood)
         normalized.append(Outcome(name=outcome.name, likelihood=clipped / total))
     return normalized
+
+
+def _coerce_dataset_value(field_type: DatasetFieldType, raw_value: Any) -> tuple[int | None, float | None, bool | None, str | None]:
+    if raw_value is None:
+        raise TypeError("Dataset values cannot be null.")
+
+    if field_type == DatasetFieldType._int:
+        if isinstance(raw_value, bool):
+            raise TypeError("Boolean cannot be used as int.")
+        if isinstance(raw_value, int):
+            return raw_value, None, None, None
+        if isinstance(raw_value, float) and raw_value.is_integer():
+            return int(raw_value), None, None, None
+        if isinstance(raw_value, str):
+            text = raw_value.strip()
+            if text == "":
+                raise TypeError("Dataset int value cannot be empty.")
+            return int(text), None, None, None
+        raise TypeError(f"Cannot coerce {raw_value!r} to int.")
+
+    if field_type == DatasetFieldType._float:
+        if isinstance(raw_value, bool):
+            raise TypeError("Boolean cannot be used as float.")
+        if isinstance(raw_value, (int, float)):
+            return None, float(raw_value), None, None
+        if isinstance(raw_value, str):
+            text = raw_value.strip()
+            if text == "":
+                raise TypeError("Dataset float value cannot be empty.")
+            return None, float(text), None, None
+        raise TypeError(f"Cannot coerce {raw_value!r} to float.")
+
+    if field_type == DatasetFieldType._bool:
+        if isinstance(raw_value, bool):
+            return None, None, raw_value, None
+        if isinstance(raw_value, (int, float)) and raw_value in (0, 1):
+            return None, None, bool(raw_value), None
+        if isinstance(raw_value, str):
+            text = raw_value.strip().lower()
+            if text in {"true", "t", "yes", "y", "1"}:
+                return None, None, True, None
+            if text in {"false", "f", "no", "n", "0"}:
+                return None, None, False, None
+        raise TypeError(f"Cannot coerce {raw_value!r} to bool.")
+
+    if isinstance(raw_value, str):
+        return None, None, None, raw_value
+    return None, None, None, str(raw_value)
 
 
 def _apply_probability_multiply(outcomes: list[Outcome], target_outcome: str, factor: float) -> list[Outcome]:
