@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from nicegui import app, ui
 from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
+from netlogo_ast.main import parse_model_text, summarize_procedures
 from models import (
     AdapterLikelihoodMode,
     ConditionOperator,
@@ -294,10 +296,72 @@ def index() -> None:
     with page_shell(title='Home', breadcrumb_path='/', max_width_class='max-w-3xl'):
         ui.label('Choose a section').classes('text-body1')
         ui.link('Go to studies', '/studies/')
+        ui.link('Go to NetLogo procedures', '/netlogo/procedures')
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
         ui.link('Go to contexts', '/contexts')
         ui.link('Go to datasets', '/datasets')
+
+
+@ui.page('/netlogo/procedures')
+def netlogo_procedures_page() -> None:
+    with page_shell(
+        title='NetLogo Procedures',
+        breadcrumb_path='/netlogo/procedures',
+        max_width_class='max-w-5xl',
+    ):
+        status = ui.label('Upload a `.nlogo`/`.nlogox` model or a plain NetLogo source file.').classes('text-body2')
+        results_container = ui.column().classes('w-full gap-2')
+
+        def render_results(filename: str, procedures: list[object]) -> None:
+            results_container.clear()
+            with results_container:
+                ui.label(f'{filename}: {len(procedures)} procedures').classes('text-subtitle2')
+                if not procedures:
+                    ui.label('No procedures found.')
+                    return
+                with ui.element('div').classes('w-full grid grid-cols-4 gap-3 font-medium text-grey-7 border-b pb-1'):
+                    ui.label('Name')
+                    ui.label('Asked by')
+                    ui.label('Args')
+                    ui.label('Variables changed')
+                for procedure in procedures:
+                    called_by = ', '.join(procedure.called_by) if procedure.called_by else 'observer'
+                    args = ', '.join(procedure.args) if procedure.args else '-'
+                    variables_changed = ', '.join(procedure.variables_changed) if procedure.variables_changed else '-'
+                    with ui.element('div').classes('w-full grid grid-cols-4 gap-3 border rounded p-2'):
+                        ui.label(procedure.name).classes('break-words')
+                        ui.label(called_by).classes('break-words')
+                        ui.label(args).classes('break-words')
+                        ui.label(variables_changed).classes('break-words')
+
+        async def handle_upload(event: UploadEventArguments) -> None:
+            suffix = Path(event.file.name).suffix.lower()
+            if suffix not in {'.nlogo', '.nlogox', '.txt', '.nl', '.netlogo'}:
+                status.set_text('Unsupported file type. Use .nlogo, .nlogox, or a plain NetLogo source file.')
+                return
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                temp_path = Path(tmp.name)
+            await event.file.save(temp_path)
+
+            try:
+                model_text = temp_path.read_text(encoding='utf-8')
+                program = parse_model_text(model_text)
+                procedures = summarize_procedures(program)
+            except UnicodeDecodeError:
+                status.set_text('Could not read file as UTF-8 text.')
+                return
+            except Exception as exc:
+                status.set_text(f'Parse failed: {exc}')
+                return
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+            status.set_text(f'Parsed {Path(event.file.name).name}.')
+            render_results(Path(event.file.name).name, procedures)
+
+        ui.upload(on_upload=handle_upload, auto_upload=True).props('accept=.nlogo,.nlogox,.txt,.nl,.netlogo')
 
 
 @ui.page('/studies/')

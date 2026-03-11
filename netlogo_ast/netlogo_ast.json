@@ -1,0 +1,1917 @@
+{
+  "declarations": [
+    {
+      "kind": "globals",
+      "name": null,
+      "values": [
+        "max-sheep"
+      ]
+    },
+    {
+      "kind": "breed",
+      "name": null,
+      "values": [
+        "sheep",
+        "a-sheep"
+      ]
+    },
+    {
+      "kind": "breed",
+      "name": null,
+      "values": [
+        "wolves",
+        "wolf"
+      ]
+    },
+    {
+      "kind": "turtles-own",
+      "name": null,
+      "values": [
+        "energy"
+      ]
+    },
+    {
+      "kind": "patches-own",
+      "name": null,
+      "values": [
+        "countdown"
+      ]
+    }
+  ],
+  "procedures": [
+    {
+      "name": "setup",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "name": "clear-all",
+            "args": [],
+            "block": null
+          },
+          {
+            "condition": {
+              "kind": "symbol",
+              "value": "netlogo-web?",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "max-sheep",
+                  "value": {
+                    "kind": "number",
+                    "value": 10000,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                }
+              ]
+            },
+            "else_block": {
+              "statements": [
+                {
+                  "name": "max-sheep",
+                  "value": {
+                    "kind": "number",
+                    "value": 30000,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "model-version",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "=",
+              "right": {
+                "kind": "string",
+                "value": "sheep-wolves-grass",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "agentset": {
+                    "kind": "symbol",
+                    "value": "patches",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "pcolor",
+                        "value": {
+                          "kind": "list",
+                          "value": null,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": [
+                            {
+                              "kind": "symbol",
+                              "value": "one-of",
+                              "left": null,
+                              "op": null,
+                              "right": null,
+                              "items": null
+                            },
+                            {
+                              "kind": "list",
+                              "value": null,
+                              "left": null,
+                              "op": null,
+                              "right": null,
+                              "items": [
+                                {
+                                  "kind": "symbol",
+                                  "value": "green",
+                                  "left": null,
+                                  "op": null,
+                                  "right": null,
+                                  "items": null
+                                },
+                                {
+                                  "kind": "symbol",
+                                  "value": "brown",
+                                  "left": null,
+                                  "op": null,
+                                  "right": null,
+                                  "items": null
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "condition": {
+                          "kind": "infix",
+                          "value": null,
+                          "left": {
+                            "kind": "symbol",
+                            "value": "pcolor",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "op": "=",
+                          "right": {
+                            "kind": "symbol",
+                            "value": "green",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "items": null
+                        },
+                        "then_block": {
+                          "statements": [
+                            {
+                              "name": "countdown",
+                              "value": {
+                                "kind": "symbol",
+                                "value": "grass-regrowth-time",
+                                "left": null,
+                                "op": null,
+                                "right": null,
+                                "items": null
+                              }
+                            }
+                          ]
+                        },
+                        "else_block": {
+                          "statements": [
+                            {
+                              "name": "countdown",
+                              "value": {
+                                "kind": "list",
+                                "value": null,
+                                "left": null,
+                                "op": null,
+                                "right": null,
+                                "items": [
+                                  {
+                                    "kind": "symbol",
+                                    "value": "random",
+                                    "left": null,
+                                    "op": null,
+                                    "right": null,
+                                    "items": null
+                                  },
+                                  {
+                                    "kind": "symbol",
+                                    "value": "grass-regrowth-time",
+                                    "left": null,
+                                    "op": null,
+                                    "right": null,
+                                    "items": null
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "else_block": {
+              "statements": [
+                {
+                  "agentset": {
+                    "kind": "symbol",
+                    "value": "patches",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "pcolor",
+                        "value": {
+                          "kind": "symbol",
+                          "value": "green",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "create-sheep",
+            "args": [
+              {
+                "kind": "symbol",
+                "value": "initial-number-sheep",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              }
+            ],
+            "block": {
+              "statements": [
+                {
+                  "name": "shape",
+                  "value": {
+                    "kind": "string",
+                    "value": "sheep",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "color",
+                  "value": {
+                    "kind": "symbol",
+                    "value": "white",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "size",
+                  "value": {
+                    "kind": "number",
+                    "value": 1.5,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "label-color",
+                  "value": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "blue",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "-",
+                    "right": {
+                      "kind": "number",
+                      "value": 2,
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  }
+                },
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "list",
+                    "value": null,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": [
+                      {
+                        "kind": "symbol",
+                        "value": "random",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": "(",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "infix",
+                        "value": null,
+                        "left": {
+                          "kind": "number",
+                          "value": 2,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "op": "*",
+                        "right": {
+                          "kind": "symbol",
+                          "value": "sheep-gain-from-food",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": ")",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "setxy",
+                  "args": [
+                    {
+                      "kind": "symbol",
+                      "value": "random-xcor",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    {
+                      "kind": "symbol",
+                      "value": "random-ycor",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    }
+                  ],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "name": "create-wolves",
+            "args": [
+              {
+                "kind": "symbol",
+                "value": "initial-number-wolves",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              }
+            ],
+            "block": {
+              "statements": [
+                {
+                  "name": "shape",
+                  "value": {
+                    "kind": "string",
+                    "value": "wolf",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "color",
+                  "value": {
+                    "kind": "symbol",
+                    "value": "black",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "size",
+                  "value": {
+                    "kind": "number",
+                    "value": 2,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "list",
+                    "value": null,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": [
+                      {
+                        "kind": "symbol",
+                        "value": "random",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": "(",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "infix",
+                        "value": null,
+                        "left": {
+                          "kind": "number",
+                          "value": 2,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "op": "*",
+                        "right": {
+                          "kind": "symbol",
+                          "value": "wolf-gain-from-food",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": ")",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "setxy",
+                  "args": [
+                    {
+                      "kind": "symbol",
+                      "value": "random-xcor",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    {
+                      "kind": "symbol",
+                      "value": "random-ycor",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    }
+                  ],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "name": "display-labels",
+            "args": [],
+            "block": null
+          },
+          {
+            "name": "reset-ticks",
+            "args": [],
+            "block": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "go",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "list",
+              "value": null,
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": [
+                {
+                  "kind": "symbol",
+                  "value": "not",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "symbol",
+                  "value": "any?",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "symbol",
+                  "value": "turtles",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                }
+              ]
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "stop",
+                  "args": [],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "condition": {
+              "kind": "list",
+              "value": null,
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": [
+                {
+                  "kind": "symbol",
+                  "value": "not",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "symbol",
+                  "value": "any?",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "infix",
+                  "value": null,
+                  "left": {
+                    "kind": "symbol",
+                    "value": "wolves",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "op": "and",
+                  "right": {
+                    "kind": "symbol",
+                    "value": "count",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "items": null
+                },
+                {
+                  "kind": "infix",
+                  "value": null,
+                  "left": {
+                    "kind": "symbol",
+                    "value": "sheep",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "op": ">",
+                  "right": {
+                    "kind": "symbol",
+                    "value": "max-sheep",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "items": null
+                }
+              ]
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "user-message",
+                  "args": [
+                    {
+                      "kind": "string",
+                      "value": "The sheep have inherited the earth",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    {
+                      "kind": "symbol",
+                      "value": "stop",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    }
+                  ],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "agentset": {
+              "kind": "symbol",
+              "value": "sheep",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            "block": {
+              "statements": [
+                {
+                  "name": "move",
+                  "args": [],
+                  "block": null
+                },
+                {
+                  "condition": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "model-version",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "=",
+                    "right": {
+                      "kind": "string",
+                      "value": "sheep-wolves-grass",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  },
+                  "then_block": {
+                    "statements": [
+                      {
+                        "name": "energy",
+                        "value": {
+                          "kind": "infix",
+                          "value": null,
+                          "left": {
+                            "kind": "symbol",
+                            "value": "energy",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "op": "-",
+                          "right": {
+                            "kind": "number",
+                            "value": 1,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "items": null
+                        }
+                      },
+                      {
+                        "name": "eat-grass",
+                        "args": [],
+                        "block": null
+                      },
+                      {
+                        "name": "death",
+                        "args": [],
+                        "block": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "reproduce-sheep",
+                  "args": [],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "agentset": {
+              "kind": "symbol",
+              "value": "wolves",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            "block": {
+              "statements": [
+                {
+                  "name": "move",
+                  "args": [],
+                  "block": null
+                },
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "energy",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "-",
+                    "right": {
+                      "kind": "number",
+                      "value": 1,
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  }
+                },
+                {
+                  "name": "eat-sheep",
+                  "args": [],
+                  "block": null
+                },
+                {
+                  "name": "death",
+                  "args": [],
+                  "block": null
+                },
+                {
+                  "name": "reproduce-wolves",
+                  "args": [],
+                  "block": null
+                }
+              ]
+            }
+          },
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "model-version",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "=",
+              "right": {
+                "kind": "string",
+                "value": "sheep-wolves-grass",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "agentset": {
+                    "kind": "symbol",
+                    "value": "patches",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "grow-grass",
+                        "args": [],
+                        "block": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "tick",
+            "args": [],
+            "block": null
+          },
+          {
+            "name": "display-labels",
+            "args": [],
+            "block": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "move",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "name": "rt",
+            "args": [
+              {
+                "kind": "symbol",
+                "value": "random",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              {
+                "kind": "number",
+                "value": 50,
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              }
+            ],
+            "block": null
+          },
+          {
+            "name": "lt",
+            "args": [
+              {
+                "kind": "symbol",
+                "value": "random",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              {
+                "kind": "number",
+                "value": 50,
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              }
+            ],
+            "block": null
+          },
+          {
+            "name": "fd",
+            "args": [
+              {
+                "kind": "number",
+                "value": 1,
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              }
+            ],
+            "block": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "eat-grass",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "pcolor",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "=",
+              "right": {
+                "kind": "symbol",
+                "value": "green",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "pcolor",
+                  "value": {
+                    "kind": "symbol",
+                    "value": "brown",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                },
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "energy",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "+",
+                    "right": {
+                      "kind": "symbol",
+                      "value": "sheep-gain-from-food",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reproduce-sheep",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "list",
+              "value": null,
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": [
+                {
+                  "kind": "symbol",
+                  "value": "random-float",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "infix",
+                  "value": null,
+                  "left": {
+                    "kind": "number",
+                    "value": 100,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "op": "<",
+                  "right": {
+                    "kind": "symbol",
+                    "value": "sheep-reproduce",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "items": null
+                }
+              ]
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "list",
+                    "value": null,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": [
+                      {
+                        "kind": "symbol",
+                        "value": "(",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "infix",
+                        "value": null,
+                        "left": {
+                          "kind": "symbol",
+                          "value": "energy",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "op": "/",
+                        "right": {
+                          "kind": "number",
+                          "value": 2,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": ")",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "hatch",
+                  "args": [
+                    {
+                      "kind": "number",
+                      "value": 1,
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    }
+                  ],
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "rt",
+                        "args": [
+                          {
+                            "kind": "symbol",
+                            "value": "random-float",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "number",
+                            "value": 360,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "symbol",
+                            "value": "fd",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "number",
+                            "value": 1,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          }
+                        ],
+                        "block": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reproduce-wolves",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "list",
+              "value": null,
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": [
+                {
+                  "kind": "symbol",
+                  "value": "random-float",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "infix",
+                  "value": null,
+                  "left": {
+                    "kind": "number",
+                    "value": 100,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "op": "<",
+                  "right": {
+                    "kind": "symbol",
+                    "value": "wolf-reproduce",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "items": null
+                }
+              ]
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "list",
+                    "value": null,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": [
+                      {
+                        "kind": "symbol",
+                        "value": "(",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "infix",
+                        "value": null,
+                        "left": {
+                          "kind": "symbol",
+                          "value": "energy",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "op": "/",
+                        "right": {
+                          "kind": "number",
+                          "value": 2,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": ")",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "hatch",
+                  "args": [
+                    {
+                      "kind": "number",
+                      "value": 1,
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    }
+                  ],
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "rt",
+                        "args": [
+                          {
+                            "kind": "symbol",
+                            "value": "random-float",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "number",
+                            "value": 360,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "symbol",
+                            "value": "fd",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "number",
+                            "value": 1,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          }
+                        ],
+                        "block": null
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "eat-sheep",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "name": "prey",
+            "value": {
+              "kind": "list",
+              "value": null,
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": [
+                {
+                  "kind": "symbol",
+                  "value": "one-of",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                {
+                  "kind": "symbol",
+                  "value": "sheep-here",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                }
+              ]
+            }
+          },
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "prey",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "!=",
+              "right": {
+                "kind": "symbol",
+                "value": "nobody",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "agentset": {
+                    "kind": "symbol",
+                    "value": "prey",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "die",
+                        "args": [],
+                        "block": null
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "energy",
+                  "value": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "energy",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "+",
+                    "right": {
+                      "kind": "symbol",
+                      "value": "wolf-gain-from-food",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "death",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "energy",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "<",
+              "right": {
+                "kind": "number",
+                "value": 0,
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "name": "die",
+                  "args": [],
+                  "block": null
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "grow-grass",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "pcolor",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "=",
+              "right": {
+                "kind": "symbol",
+                "value": "brown",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "condition": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "countdown",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "<=",
+                    "right": {
+                      "kind": "number",
+                      "value": 0,
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  },
+                  "then_block": {
+                    "statements": [
+                      {
+                        "name": "pcolor",
+                        "value": {
+                          "kind": "symbol",
+                          "value": "green",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        }
+                      },
+                      {
+                        "name": "countdown",
+                        "value": {
+                          "kind": "symbol",
+                          "value": "grass-regrowth-time",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        }
+                      }
+                    ]
+                  },
+                  "else_block": {
+                    "statements": [
+                      {
+                        "name": "countdown",
+                        "value": {
+                          "kind": "infix",
+                          "value": null,
+                          "left": {
+                            "kind": "symbol",
+                            "value": "countdown",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "op": "-",
+                          "right": {
+                            "kind": "number",
+                            "value": 1,
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          "items": null
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "grass",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "condition": {
+              "kind": "infix",
+              "value": null,
+              "left": {
+                "kind": "symbol",
+                "value": "model-version",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "op": "=",
+              "right": {
+                "kind": "string",
+                "value": "sheep-wolves-grass",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "value": {
+                    "kind": "list",
+                    "value": null,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": [
+                      {
+                        "kind": "symbol",
+                        "value": "patches",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "symbol",
+                        "value": "with",
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": null
+                      },
+                      {
+                        "kind": "list",
+                        "value": null,
+                        "left": null,
+                        "op": null,
+                        "right": null,
+                        "items": [
+                          {
+                            "kind": "symbol",
+                            "value": "pcolor",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "symbol",
+                            "value": "=",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          },
+                          {
+                            "kind": "symbol",
+                            "value": "green",
+                            "left": null,
+                            "op": null,
+                            "right": null,
+                            "items": null
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "else_block": {
+              "statements": [
+                {
+                  "value": {
+                    "kind": "number",
+                    "value": 0,
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "display-labels",
+      "args": [],
+      "body": {
+        "statements": [
+          {
+            "agentset": {
+              "kind": "symbol",
+              "value": "turtles",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            "block": {
+              "statements": [
+                {
+                  "name": "label",
+                  "value": {
+                    "kind": "string",
+                    "value": "",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "condition": {
+              "kind": "symbol",
+              "value": "show-energy?",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            "then_block": {
+              "statements": [
+                {
+                  "agentset": {
+                    "kind": "symbol",
+                    "value": "wolves",
+                    "left": null,
+                    "op": null,
+                    "right": null,
+                    "items": null
+                  },
+                  "block": {
+                    "statements": [
+                      {
+                        "name": "label",
+                        "value": {
+                          "kind": "list",
+                          "value": null,
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": [
+                            {
+                              "kind": "symbol",
+                              "value": "round",
+                              "left": null,
+                              "op": null,
+                              "right": null,
+                              "items": null
+                            },
+                            {
+                              "kind": "symbol",
+                              "value": "energy",
+                              "left": null,
+                              "op": null,
+                              "right": null,
+                              "items": null
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "condition": {
+                    "kind": "infix",
+                    "value": null,
+                    "left": {
+                      "kind": "symbol",
+                      "value": "model-version",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "op": "=",
+                    "right": {
+                      "kind": "string",
+                      "value": "sheep-wolves-grass",
+                      "left": null,
+                      "op": null,
+                      "right": null,
+                      "items": null
+                    },
+                    "items": null
+                  },
+                  "then_block": {
+                    "statements": [
+                      {
+                        "agentset": {
+                          "kind": "symbol",
+                          "value": "sheep",
+                          "left": null,
+                          "op": null,
+                          "right": null,
+                          "items": null
+                        },
+                        "block": {
+                          "statements": [
+                            {
+                              "name": "label",
+                              "value": {
+                                "kind": "list",
+                                "value": null,
+                                "left": null,
+                                "op": null,
+                                "right": null,
+                                "items": [
+                                  {
+                                    "kind": "symbol",
+                                    "value": "round",
+                                    "left": null,
+                                    "op": null,
+                                    "right": null,
+                                    "items": null
+                                  },
+                                  {
+                                    "kind": "symbol",
+                                    "value": "energy",
+                                    "left": null,
+                                    "op": null,
+                                    "right": null,
+                                    "items": null
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

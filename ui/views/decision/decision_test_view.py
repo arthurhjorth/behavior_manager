@@ -4,6 +4,7 @@ from nicegui import ui
 from sqlmodel import Session
 
 from models import (
+    AdapterType,
     AdapterLikelihoodMode,
     Agent,
     BinaryAdapter,
@@ -26,6 +27,7 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
             ui.button('Back', on_click=lambda: ui.navigate.to(back_url))
             return
         used_variables = _used_variables_for_decision(session, decision_id)
+        adapter_meta = _adapter_effect_meta(session, decision_id)
 
     ui.label(f'Test: {decision.name}').classes('text-h6')
     if not used_variables:
@@ -41,6 +43,22 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
             else:
                 control = ui.number(variable.name, value=_variable_default(variable), step=0.01).classes('w-full')
             variable_inputs[variable.name] = (variable.var_type, control)
+
+    ui.separator()
+    ui.label('Adapter activation').classes('text-subtitle2')
+    include_state: dict[int, bool] = {}
+    for item in adapter_meta:
+        include_state[item['id']] = True
+    if not adapter_meta:
+        ui.label('No adapters configured.').classes('text-body2 text-grey-7')
+    else:
+        with ui.column().classes('w-full gap-1'):
+            for item in adapter_meta:
+                checkbox = ui.checkbox(item['label'], value=True).classes('w-full')
+                checkbox.on('update:model-value', lambda event, aid=item['id']: include_state.__setitem__(aid, bool(event.value)))
+
+    show_inactive_switch = ui.switch('Show inactive adapters in trace', value=False)
+    show_skipped_switch = ui.switch('Show skipped adapters in trace', value=False)
 
     def run_test() -> None:
         try:
@@ -58,13 +76,18 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
             current = _copy_outcomes(runtime.outcomes or [])
             steps: list[dict] = []
             for index, adapter in enumerate(runtime.adapters, start=1):
+                effect_id = adapter_meta[index - 1]['id'] if index - 1 < len(adapter_meta) else index
+                step_label = adapter_meta[index - 1]['label'] if index - 1 < len(adapter_meta) else _adapter_label(adapter)
+                is_active = include_state.get(effect_id, True)
                 before = _copy_outcomes(current)
-                applied = _adapter_applies(adapter, table)
-                after = _copy_outcomes(adapter.modify(before, table))
+                applied = _adapter_applies(adapter, table) if is_active else False
+                after = _copy_outcomes(adapter.modify(before, table)) if is_active else _copy_outcomes(before)
                 steps.append(
                     {
                         'index': index,
-                        'label': _adapter_label(adapter),
+                        'effect_id': effect_id,
+                        'label': step_label,
+                        'active': is_active,
                         'applied': applied,
                         'before': before,
                         'after': after,
@@ -97,11 +120,19 @@ def render_decision_test_view(*, engine, decision_id: int, back_url: str) -> Non
                 _render_outcome_changes(runtime.outcomes or [], runtime.outcomes or [], baseline_probs, baseline_probs)
 
             for step in steps:
+                if not show_inactive_switch.value and not step['active']:
+                    continue
+                if not show_skipped_switch.value and step['active'] and not step['applied']:
+                    continue
                 before_probs = _probabilities(step['before'])
                 after_probs = _probabilities(step['after'])
                 with ui.column().classes('w-full border rounded p-2 gap-1'):
-                    status = 'applied' if step['applied'] else 'skipped'
-                    status_color = 'text-positive' if step['applied'] else 'text-grey-7'
+                    if not step['active']:
+                        status = 'inactive'
+                        status_color = 'text-grey-7'
+                    else:
+                        status = 'applied' if step['applied'] else 'skipped'
+                        status_color = 'text-positive' if step['applied'] else 'text-grey-7'
                     ui.label(f"Step {step['index']}: {step['label']}").classes('text-body1 text-weight-medium')
                     ui.label(status).classes(f'text-caption {status_color}')
                     _render_outcome_changes(step['before'], step['after'], before_probs, after_probs)
@@ -209,6 +240,53 @@ def _adapter_label(adapter) -> str:
         return f'multiply {adapter.target_outcome} by {formula}'
 
     return 'adapter'
+
+
+def _adapter_effect_meta(session: Session, decision_id: int) -> list[dict[str, object]]:
+    outcomes = decision_repo.list_outcomes(session, decision_id)
+    outcome_name_by_id = {int(outcome.id): outcome.name for outcome in outcomes if outcome.id is not None}
+    items: list[dict[str, object]] = []
+    for adapter_set in decision_repo.list_adapter_sets(session, decision_id):
+        set_name = adapter_set.name
+        effects = decision_repo.list_adapters(session, adapter_set_id=int(adapter_set.id))
+        for effect in effects:
+            effect_id = int(effect.id)
+            target = outcome_name_by_id.get(effect.target_outcome_id, f'#{effect.target_outcome_id}')
+            label = _effect_row_label(effect, target, set_name)
+            items.append({'id': effect_id, 'label': label})
+    return items
+
+
+def _effect_row_label(effect, target: str, set_name: str) -> str:
+    prefix = f'[{set_name}] '
+    if effect.adapter_type == AdapterType.binary:
+        if effect.likelihood_mode == AdapterLikelihoodMode.set:
+            value = effect.set_likelihood if effect.set_likelihood is not None else '<unset>'
+            return f'{prefix}set {target} {value}'
+        if effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+            value = effect.add_points if effect.add_points is not None else '<unset>'
+            return f'{prefix}add {target} by {value} %-pts'
+        if effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+            value = effect.multiplier if effect.multiplier is not None else '<unset>'
+            return f'{prefix}multiply probability of {target} by {value}'
+        value = effect.multiplier if effect.multiplier is not None else '<unset>'
+        return f'{prefix}multiply {target} by {value}'
+
+    formula = _linear_summary(effect)
+    if effect.likelihood_mode == AdapterLikelihoodMode.set:
+        return f'{prefix}set {target} {formula}'
+    if effect.likelihood_mode == AdapterLikelihoodMode.add_points:
+        return f'{prefix}add {target} by {formula} %-pts'
+    if effect.likelihood_mode == AdapterLikelihoodMode.probability_multiply:
+        return f'{prefix}multiply probability of {target} by {formula}'
+    return f'{prefix}multiply {target} by {formula}'
+
+
+def _linear_summary(effect) -> str:
+    intercept = effect.intercept if effect.intercept is not None else 0.0
+    minimum = effect.min_multiplier if effect.min_multiplier is not None else 0.0
+    maximum = 'none' if effect.max_multiplier is None else str(effect.max_multiplier)
+    return f'linear(intercept={intercept}, min={minimum}, max={maximum})'
 
 
 def _render_outcome_changes(

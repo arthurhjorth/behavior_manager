@@ -190,8 +190,9 @@ def create_adapter_set(
     decision_id: int,
     name: str = "Rule Set",
     order_index: int = 0,
+    study_id: int | None = None,
 ) -> AdapterSetRecord:
-    row = AdapterSetRecord(decision_id=decision_id, name=name, order_index=order_index)
+    row = AdapterSetRecord(decision_id=decision_id, study_id=study_id, name=name, order_index=order_index)
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -204,12 +205,14 @@ def update_adapter_set(
     adapter_set_id: int,
     name: str,
     order_index: int,
+    study_id: int | None,
 ) -> AdapterSetRecord:
     row = session.get(AdapterSetRecord, adapter_set_id)
     if row is None:
         raise ValueError(f"Adapter set {adapter_set_id} not found")
     row.name = name
     row.order_index = order_index
+    row.study_id = study_id
     session.add(row)
     session.commit()
     session.refresh(row)

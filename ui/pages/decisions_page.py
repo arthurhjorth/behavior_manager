@@ -12,6 +12,7 @@ from models import (
     ConditionOperator,
     LinearCoefficientRecord,
     PredicateRecord,
+    list_studies,
 )
 from repositories import decision_repo
 from services import decision_service
@@ -241,6 +242,7 @@ def register_decision_pages(engine) -> None:
             adapter_set = session.get(AdapterSetRecord, adapter_id)
             outcome_options = _outcome_options(session, decision_id)
             effects = decision_repo.list_adapters(session, adapter_set_id=adapter_id)
+            studies = list_studies(session)
             decision_label = decision.name if decision else f'#{decision_id}'
             adapter_label = adapter_set.name if adapter_set else f'#{adapter_id}'
 
@@ -268,7 +270,7 @@ def register_decision_pages(engine) -> None:
             max_width_class='max-w-3xl',
             breadcrumb_items=breadcrumbs,
         ):
-            _render_adapter_set_edit(engine, decision_id, adapter_set, effects, outcome_options)
+            _render_adapter_set_edit(engine, decision_id, adapter_set, effects, outcome_options, studies)
 
     @ui.page('/decisions/{decision_id}/adapters/{adapter_id}/effects/new/binary')
     def binary_effect_create(decision_id: int, adapter_id: int) -> None:
@@ -814,6 +816,7 @@ def _render_adapter_set_edit(
     adapter_set: AdapterSetRecord,
     effects: list[AdapterRecord],
     outcome_options: dict[int, str],
+    studies: list,
 ) -> None:
     with ui.row().classes('justify-end w-full'):
         confirm_delete_button(
@@ -824,11 +827,37 @@ def _render_adapter_set_edit(
 
     set_name = ui.input('Set name', value=adapter_set.name).classes('w-full')
     set_order = ui.number('Set order', value=adapter_set.order_index, step=1).classes('w-full')
+    study_options = {0: 'No study'}
+    study_options.update(
+        {int(study.id): study.name for study in studies if study.id is not None}
+    )
+    study_select = ui.select(
+        study_options,
+        value=int(adapter_set.study_id) if adapter_set.study_id is not None else 0,
+        label='Study',
+    ).classes('w-full')
     ui.button(
         'Save Set',
-        on_click=lambda: _save_adapter_set(engine, int(adapter_set.id), str(set_name.value or 'Rule Set'), int(set_order.value or 0)),
+        on_click=lambda: _save_adapter_set(
+            engine,
+            int(adapter_set.id),
+            str(set_name.value or 'Rule Set'),
+            int(set_order.value or 0),
+            None if int(study_select.value or 0) == 0 else int(study_select.value),
+        ),
         color='primary',
     ).props('outline')
+
+    ui.separator()
+    render_chain_list(
+        engine=engine,
+        adapter_id=adapter_set.id,
+        on_open=lambda chain_id: ui.navigate.to(
+            f'/decisions/{decision_id}/adapters/{adapter_set.id}/chains/{chain_id}/edit'
+        ),
+        on_create=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set.id}/chains/new'),
+        on_delete=lambda chain_id: _delete_chain_and_refresh(engine, decision_id, adapter_set.id, chain_id),
+    )
 
     ui.separator()
     ui.label('Effects').classes('text-h6')
@@ -860,17 +889,6 @@ def _render_adapter_set_edit(
             on_click=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set.id}/effects/new/linear'),
             color='primary',
         ).props('outline')
-
-    ui.separator()
-    render_chain_list(
-        engine=engine,
-        adapter_id=adapter_set.id,
-        on_open=lambda chain_id: ui.navigate.to(
-            f'/decisions/{decision_id}/adapters/{adapter_set.id}/chains/{chain_id}/edit'
-        ),
-        on_create=lambda: ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_set.id}/chains/new'),
-        on_delete=lambda chain_id: _delete_chain_and_refresh(engine, decision_id, adapter_set.id, chain_id),
-    )
 
 
 def _render_binary_adapter_edit(
@@ -1121,9 +1139,21 @@ def _delete_predicate_and_refresh(
     ui.navigate.to(f'/decisions/{decision_id}/adapters/{adapter_id}/chains/{chain_id}/edit')
 
 
-def _save_adapter_set(engine, adapter_set_id: int, name: str, order_index: int) -> None:
+def _save_adapter_set(
+    engine,
+    adapter_set_id: int,
+    name: str,
+    order_index: int,
+    study_id: int | None,
+) -> None:
     with Session(engine) as session:
-        decision_repo.update_adapter_set(session, adapter_set_id=adapter_set_id, name=name, order_index=order_index)
+        decision_repo.update_adapter_set(
+            session,
+            adapter_set_id=adapter_set_id,
+            name=name,
+            order_index=order_index,
+            study_id=study_id,
+        )
     ui.notify('Adapter set saved.', color='positive')
 
 

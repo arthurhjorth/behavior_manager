@@ -1,7 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from typing import Any, FrozenSet, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Set
+from collections import OrderedDict
 import json, re
+import xml.etree.ElementTree as ET
 
 # AST node classes (same as previous cell)
 @dataclass
@@ -464,22 +466,390 @@ def summarize_block(
             lines.append(f"{pad}{stmt.__class__.__name__}")
     return lines
 
-def describe_procedure(program: Program, procedure_name: str, *, iteratively: bool = False) -> str:
+@dataclass
+class ProcedureDescription:
+    procedure_name: str
+    recursive: bool
+    asked_by: List[str]
+    agent_variables_changed: List[str]
+    summary_lines: List[str]
+
+    def to_text(self) -> str:
+        lines: List[str] = []
+        if self.asked_by:
+            lines.append(f"ASKED BY: {', '.join(self.asked_by)}")
+        else:
+            lines.append("ASKED BY: observer")
+
+        if self.agent_variables_changed:
+            lines.append(
+                "AGENT VARIABLES CHANGED: " + ", ".join(self.agent_variables_changed)
+            )
+        else:
+            lines.append("AGENT VARIABLES CHANGED: (none)")
+
+        if self.summary_lines:
+            lines.append("")
+            lines.extend(self.summary_lines)
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {
+            "procedure": self.procedure_name,
+            "recursive": self.recursive,
+            "asked_by": self.asked_by,
+            "agent_variables_changed": self.agent_variables_changed,
+            "summary_lines": self.summary_lines,
+        }
+
+
+@dataclass
+class ProcedureSummary:
+    name: str
+    called_by: List[str]
+    args: List[str]
+    variables_changed: List[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "called_by": self.called_by,
+            "args": self.args,
+            "variables_changed": self.variables_changed,
+        }
+
+def collect_let_names(block: Block, *, sink: Optional[Set[str]] = None) -> Set[str]:
+    seen = sink if sink is not None else set()
+    for stmt in block.statements:
+        if isinstance(stmt, Let):
+            seen.add(stmt.name.lower())
+        if isinstance(stmt, Ask):
+            collect_let_names(stmt.block, sink=seen)
+        elif isinstance(stmt, If):
+            collect_let_names(stmt.then_block, sink=seen)
+        elif isinstance(stmt, IfElse):
+            collect_let_names(stmt.then_block, sink=seen)
+            collect_let_names(stmt.else_block, sink=seen)
+        elif isinstance(stmt, Call) and stmt.block:
+            collect_let_names(stmt.block, sink=seen)
+    return seen
+
+def collect_agent_variable_changes_for_procedure(
+    procedure: Procedure,
+    *,
+    globals_lower: Set[str],
+    procedure_lookup: Optional[Dict[str, Procedure]],
+    include_children: bool,
+    call_stack: FrozenSet[str],
+    let_cache: Dict[str, Set[str]],
+    memo: Dict[tuple[str, bool], OrderedDict[str, str]],
+) -> OrderedDict[str, str]:
+    key = (procedure.name.lower(), include_children)
+    if key in memo:
+        return memo[key]
+
+    let_names = let_cache.get(procedure.name.lower())
+    if let_names is None:
+        let_names = collect_let_names(procedure.body)
+        let_cache[procedure.name.lower()] = let_names
+
+    collector: OrderedDict[str, str] = OrderedDict()
+
+    collect_agent_variable_changes_in_block(
+        procedure.body,
+        collector,
+        globals_lower=globals_lower,
+        local_let_names=let_names,
+        procedure_lookup=procedure_lookup if include_children else None,
+        include_children=include_children,
+        call_stack=call_stack,
+        let_cache=let_cache,
+        memo=memo,
+    )
+    memo[key] = collector
+    return collector
+
+def collect_agent_variable_changes_in_block(
+    block: Block,
+    collector: OrderedDict[str, str],
+    *,
+    globals_lower: Set[str],
+    local_let_names: Set[str],
+    procedure_lookup: Optional[Dict[str, Procedure]],
+    include_children: bool,
+    call_stack: FrozenSet[str],
+    let_cache: Dict[str, Set[str]],
+    memo: Dict[tuple[str, bool], OrderedDict[str, str]],
+) -> None:
+    for stmt in block.statements:
+        if isinstance(stmt, Set):
+            name_lower = stmt.name.lower()
+            if name_lower in globals_lower or name_lower in local_let_names:
+                continue
+            if name_lower not in collector:
+                collector[name_lower] = stmt.name
+        elif isinstance(stmt, Ask):
+            collect_agent_variable_changes_in_block(
+                stmt.block,
+                collector,
+                globals_lower=globals_lower,
+                local_let_names=local_let_names,
+                procedure_lookup=procedure_lookup,
+                include_children=include_children,
+                call_stack=call_stack,
+                let_cache=let_cache,
+                memo=memo,
+            )
+        elif isinstance(stmt, If):
+            collect_agent_variable_changes_in_block(
+                stmt.then_block,
+                collector,
+                globals_lower=globals_lower,
+                local_let_names=local_let_names,
+                procedure_lookup=procedure_lookup,
+                include_children=include_children,
+                call_stack=call_stack,
+                let_cache=let_cache,
+                memo=memo,
+            )
+        elif isinstance(stmt, IfElse):
+            collect_agent_variable_changes_in_block(
+                stmt.then_block,
+                collector,
+                globals_lower=globals_lower,
+                local_let_names=local_let_names,
+                procedure_lookup=procedure_lookup,
+                include_children=include_children,
+                call_stack=call_stack,
+                let_cache=let_cache,
+                memo=memo,
+            )
+            collect_agent_variable_changes_in_block(
+                stmt.else_block,
+                collector,
+                globals_lower=globals_lower,
+                local_let_names=local_let_names,
+                procedure_lookup=procedure_lookup,
+                include_children=include_children,
+                call_stack=call_stack,
+                let_cache=let_cache,
+                memo=memo,
+            )
+        elif isinstance(stmt, Call):
+            if include_children and procedure_lookup:
+                target_key = stmt.name.lower()
+                target_proc = procedure_lookup.get(target_key)
+                if target_proc and target_key not in call_stack:
+                    child_collector = collect_agent_variable_changes_for_procedure(
+                        target_proc,
+                        globals_lower=globals_lower,
+                        procedure_lookup=procedure_lookup,
+                        include_children=True,
+                        call_stack=call_stack.union({target_key}),
+                        let_cache=let_cache,
+                        memo=memo,
+                    )
+                    for lower_name, original in child_collector.items():
+                        if lower_name not in collector:
+                            collector[lower_name] = original
+            if stmt.block:
+                collect_agent_variable_changes_in_block(
+                    stmt.block,
+                    collector,
+                    globals_lower=globals_lower,
+                    local_let_names=local_let_names,
+                    procedure_lookup=procedure_lookup,
+                    include_children=include_children,
+                    call_stack=call_stack,
+                    let_cache=let_cache,
+                    memo=memo,
+                )
+
+def collect_ask_contexts_for_procedure(
+    program: Program, target_key: str
+) -> List[str]:
+    contexts: List[str] = []
+    seen: Set[str] = set()
+
+    for proc in program.procedures:
+        _collect_ask_contexts_in_block(
+            proc.body,
+            target_key,
+            [],
+            contexts,
+            seen,
+        )
+    return contexts
+
+def _collect_ask_contexts_in_block(
+    block: Block,
+    target_key: str,
+    ask_stack: List[str],
+    contexts: List[str],
+    seen: Set[str],
+) -> None:
+    for stmt in block.statements:
+        if isinstance(stmt, Ask):
+            expr_text = expr_to_text(stmt.agentset).strip()
+            _collect_ask_contexts_in_block(
+                stmt.block,
+                target_key,
+                ask_stack + [expr_text],
+                contexts,
+                seen,
+            )
+        elif isinstance(stmt, If):
+            _collect_ask_contexts_in_block(
+                stmt.then_block,
+                target_key,
+                ask_stack,
+                contexts,
+                seen,
+            )
+        elif isinstance(stmt, IfElse):
+            _collect_ask_contexts_in_block(
+                stmt.then_block,
+                target_key,
+                ask_stack,
+                contexts,
+                seen,
+            )
+            _collect_ask_contexts_in_block(
+                stmt.else_block,
+                target_key,
+                ask_stack,
+                contexts,
+                seen,
+            )
+        elif isinstance(stmt, Call):
+            if stmt.name.lower() == target_key:
+                context = ask_stack[-1] if ask_stack else "observer"
+                seen_key = context.lower()
+                if seen_key not in seen:
+                    contexts.append(context)
+                    seen.add(seen_key)
+            if stmt.block:
+                _collect_ask_contexts_in_block(
+                    stmt.block,
+                    target_key,
+                    ask_stack,
+                    contexts,
+                    seen,
+                )
+def describe_procedure(
+    program: Program, procedure_name: str, *, iteratively: bool = False
+) -> ProcedureDescription:
     lookup = {proc.name.lower(): proc for proc in program.procedures}
     target = lookup.get(procedure_name.lower())
     if not target:
         raise ValueError(f"Procedure '{procedure_name}' not found.")
     initial_stack = frozenset({target.name.lower()}) if iteratively else None
-    lines = summarize_block(
+    summary_lines = summarize_block(
         target.body,
         iteratively=iteratively,
         procedure_lookup=lookup,
         call_stack=initial_stack,
     )
-    return "\n".join(lines)
+    asked_by = collect_ask_contexts_for_procedure(program, target.name.lower())
+
+    globals_lower: Set[str] = {
+        value.lower()
+        for decl in program.declarations
+        if decl.kind.lower() == "globals"
+        for value in decl.values
+    }
+    let_cache: Dict[str, Set[str]] = {}
+    memo: Dict[tuple[str, bool], OrderedDict[str, str]] = {}
+    agent_variable_changes = collect_agent_variable_changes_for_procedure(
+        target,
+        globals_lower=globals_lower,
+        procedure_lookup=lookup,
+        include_children=iteratively,
+        call_stack=frozenset({target.name.lower()}),
+        let_cache=let_cache,
+        memo=memo,
+    )
+
+    return ProcedureDescription(
+        procedure_name=target.name,
+        recursive=iteratively,
+        asked_by=asked_by,
+        agent_variables_changed=list(agent_variable_changes.values()),
+        summary_lines=summary_lines,
+    )
+
+
+def extract_code_section(model_text: str) -> str:
+    xml_code = _extract_code_from_xml_model(model_text)
+    if xml_code is not None:
+        return xml_code
+
+    separator = '@#$#@#$#@'
+    if separator not in model_text:
+        return model_text
+    return model_text.split(separator, 1)[0]
+
+
+def _extract_code_from_xml_model(model_text: str) -> Optional[str]:
+    stripped = model_text.lstrip()
+    if not stripped.startswith('<?xml') and not stripped.startswith('<model'):
+        return None
+
+    try:
+        root = ET.fromstring(model_text)
+    except ET.ParseError:
+        return None
+
+    if root.tag != 'model':
+        return None
+
+    code_element = root.find('code')
+    if code_element is None:
+        raise ValueError('NetLogo XML model is missing a <code> element.')
+
+    return code_element.text or ''
+
+
+def parse_model_text(model_text: str) -> Program:
+    tokens = tokenize(extract_code_section(model_text))
+    parser = Parser(tokens)
+    return parser.parse_program()
+
+
+def summarize_procedures(program: Program) -> List[ProcedureSummary]:
+    lookup = {proc.name.lower(): proc for proc in program.procedures}
+    globals_lower: Set[str] = {
+        value.lower()
+        for decl in program.declarations
+        if decl.kind.lower() == "globals"
+        for value in decl.values
+    }
+    let_cache: Dict[str, Set[str]] = {}
+    memo: Dict[tuple[str, bool], OrderedDict[str, str]] = {}
+
+    return [
+        ProcedureSummary(
+            name=proc.name,
+            called_by=collect_ask_contexts_for_procedure(program, proc.name.lower()),
+            args=list(proc.args),
+            variables_changed=list(
+                collect_agent_variable_changes_for_procedure(
+                    proc,
+                    globals_lower=globals_lower,
+                    procedure_lookup=lookup,
+                    include_children=False,
+                    call_stack=frozenset({proc.name.lower()}),
+                    let_cache=let_cache,
+                    memo=memo,
+                ).values()
+            ),
+        )
+        for proc in program.procedures
+    ]
 
 # Run on provided code
-netlogo_code = r'''globals [ max-sheep ]  ; don't let the sheep population grow too large
+def _demo() -> None:
+    netlogo_code = r'''globals [ max-sheep ]  ; don't let the sheep population grow too large
 breed [ sheep a-sheep ]
 breed [ wolves wolf ]
 turtles-own [ energy ]
@@ -611,27 +981,37 @@ to display-labels
 end
 '''
 
-proc_name = "eat-sheep"
-tokens = tokenize(netlogo_code)
-parser = Parser(tokens)
-program = parser.parse_program()
-go_proc = {p.name: p for p in program.procedures}.get(proc_name)
+    proc_name = "eat-sheep"
+    program = parse_model_text(netlogo_code)
+    go_proc_lookup = {p.name: p for p in program.procedures}
+    go_proc = go_proc_lookup.get(proc_name)
 
-focused_json = ast_to_json(go_proc) if go_proc else "{}"
-summary_text = describe_procedure(program, proc_name, iteratively=True) 
+    description = describe_procedure(program, proc_name, iteratively=True)
+    summary_text = description.to_text()
 
-with open("netlogo_ast.json","w", encoding="utf-8") as f:
-    f.write(json.dumps(program.to_dict(), indent=2))
-with open("go_ast.json","w", encoding="utf-8") as f:
-    f.write(focused_json)
-with open("go_summary.txt","w", encoding="utf-8") as f:
-    f.write(summary_text)
+    if go_proc:
+        proc_dict = go_proc.to_dict()
+        proc_dict["description"] = description.to_dict()
+        focused_json = json.dumps(proc_dict, indent=2)
+    else:
+        focused_json = "{}"
 
-print("=== Procedure 'go' AST ===")
-print(focused_json[:100000])
-print("\n=== Who does what when (summary) ===")
-print(summary_text)
-print("\nArtifacts:")
-print("- Full AST: netlogo_ast.json")
-print("- 'go' AST: go_ast.json")
-print("- Summary:  go_summary.txt")
+    with open("netlogo_ast.json","w", encoding="utf-8") as f:
+        f.write(json.dumps(program.to_dict(), indent=2))
+    with open("go_ast.json","w", encoding="utf-8") as f:
+        f.write(focused_json)
+    with open("go_summary.txt","w", encoding="utf-8") as f:
+        f.write(summary_text)
+
+    print(f"=== Procedure '{proc_name}' AST ===")
+    print(focused_json[:100000])
+    print("\n=== Who does what when (summary) ===")
+    print(summary_text)
+    print("\nArtifacts:")
+    print("- Full AST: netlogo_ast.json")
+    print("- 'go' AST: go_ast.json")
+    print("- Summary:  go_summary.txt")
+
+
+if __name__ == "__main__":
+    _demo()

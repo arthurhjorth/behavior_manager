@@ -1,0 +1,8 @@
+ASKED BY: wolves
+AGENT VARIABLES CHANGED: energy
+
+LET prey = [one-of sheep-here]
+IF (prey != nobody) THEN:
+  ASK prey DO:
+    DIE
+  SET energy = (energy + wolf-gain-from-food)

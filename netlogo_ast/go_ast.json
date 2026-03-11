@@ -1,0 +1,125 @@
+{
+  "name": "eat-sheep",
+  "args": [],
+  "body": {
+    "statements": [
+      {
+        "name": "prey",
+        "value": {
+          "kind": "list",
+          "value": null,
+          "left": null,
+          "op": null,
+          "right": null,
+          "items": [
+            {
+              "kind": "symbol",
+              "value": "one-of",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            },
+            {
+              "kind": "symbol",
+              "value": "sheep-here",
+              "left": null,
+              "op": null,
+              "right": null,
+              "items": null
+            }
+          ]
+        }
+      },
+      {
+        "condition": {
+          "kind": "infix",
+          "value": null,
+          "left": {
+            "kind": "symbol",
+            "value": "prey",
+            "left": null,
+            "op": null,
+            "right": null,
+            "items": null
+          },
+          "op": "!=",
+          "right": {
+            "kind": "symbol",
+            "value": "nobody",
+            "left": null,
+            "op": null,
+            "right": null,
+            "items": null
+          },
+          "items": null
+        },
+        "then_block": {
+          "statements": [
+            {
+              "agentset": {
+                "kind": "symbol",
+                "value": "prey",
+                "left": null,
+                "op": null,
+                "right": null,
+                "items": null
+              },
+              "block": {
+                "statements": [
+                  {
+                    "name": "die",
+                    "args": [],
+                    "block": null
+                  }
+                ]
+              }
+            },
+            {
+              "name": "energy",
+              "value": {
+                "kind": "infix",
+                "value": null,
+                "left": {
+                  "kind": "symbol",
+                  "value": "energy",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                "op": "+",
+                "right": {
+                  "kind": "symbol",
+                  "value": "wolf-gain-from-food",
+                  "left": null,
+                  "op": null,
+                  "right": null,
+                  "items": null
+                },
+                "items": null
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "description": {
+    "procedure": "eat-sheep",
+    "recursive": true,
+    "asked_by": [
+      "wolves"
+    ],
+    "agent_variables_changed": [
+      "energy"
+    ],
+    "summary_lines": [
+      "LET prey = [one-of sheep-here]",
+      "IF (prey != nobody) THEN:",
+      "  ASK prey DO:",
+      "    DIE",
+      "  SET energy = (energy + wolf-gain-from-food)"
+    ]
+  }
+}

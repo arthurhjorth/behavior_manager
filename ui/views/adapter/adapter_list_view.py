@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from nicegui import ui
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from models import AdapterLikelihoodMode, AdapterType
+from models import AdapterLikelihoodMode, AdapterType, Study
 from repositories import decision_repo
 from ui.components.confirm_actions import confirm_delete_button
 
@@ -26,6 +26,11 @@ def render_adapter_list(
         variables = decision_repo.list_variables(session)
         outcome_names = {int(outcome.id): outcome.name for outcome in outcomes if outcome.id is not None}
         variable_names = {int(variable.id): variable.name for variable in variables if variable.id is not None}
+        study_names = {
+            int(study.id): study.name
+            for study in session.exec(select(Study))
+            if study.id is not None
+        }
 
     if not sets:
         ui.label('No adapter sets yet.')
@@ -36,8 +41,12 @@ def render_adapter_list(
                 effects = decision_repo.list_adapters(session, adapter_set_id=int(adapter_set.id))
                 chain_text = _set_condition_text(session, chains, variable_names)
                 effect_text = _set_effect_text(effects, outcome_names)
+            study_suffix = ''
+            if adapter_set.study_id is not None:
+                study_label = study_names.get(int(adapter_set.study_id), f'#{adapter_set.study_id}')
+                study_suffix = f' ({study_label})'
             with ui.row().classes('items-center justify-between w-full border rounded p-2'):
-                ui.label(f'{chain_text} then {effect_text}')
+                ui.label(f'{chain_text} then {effect_text}{study_suffix}')
                 with ui.row().classes('gap-1'):
                     ui.button('Edit', on_click=lambda sid=adapter_set.id: on_edit(int(sid))).props('flat')
                     confirm_delete_button(

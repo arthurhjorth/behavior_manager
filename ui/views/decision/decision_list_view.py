@@ -4,9 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from nicegui import ui
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from models import AdapterLikelihoodMode, AdapterType
+from models import AdapterLikelihoodMode, AdapterType, Study
 from repositories import decision_repo
 from ui.components.confirm_actions import confirm_delete_button
 
@@ -31,6 +31,7 @@ def render_decision_list(
                 outcomes = decision_repo.list_outcomes(session, int(decision.id))
                 adapter_views = _adapter_views(session, int(decision.id))
                 variable_dependencies = _decision_variable_dependencies(session, int(decision.id))
+                referenced_studies = _decision_referenced_studies(session, int(decision.id))
 
             with ui.column().classes('w-full border rounded p-2 gap-2'):
                 with ui.row().classes('items-center justify-between w-full'):
@@ -47,6 +48,15 @@ def render_decision_list(
                             item_name=f'decision "{decision.name}"',
                             on_confirm=lambda did=decision.id: on_delete(int(did)),
                         )
+
+                with ui.column().classes('gap-1'):
+                    ui.label('Studies referenced').classes('text-caption text-grey-7')
+                    if not referenced_studies:
+                        ui.label('None').classes('text-body2')
+                    else:
+                        with ui.row().classes('w-full gap-2 flex-wrap'):
+                            for study in referenced_studies:
+                                ui.link(study.name, f'/studies/{int(study.id)}').classes('border rounded px-2 py-1 text-caption')
 
                 with ui.column().classes('gap-1'):
                     ui.label('Outcomes').classes('text-caption text-grey-7')
@@ -93,6 +103,8 @@ def render_decision_list(
                                         ui.label(')').classes('text-grey-7')
                                 ui.label('then').classes('text-body2')
                                 ui.label(adapter_view['effect_text']).classes('text-body2')
+                                if adapter_view['study_label']:
+                                    ui.label(f"({adapter_view['study_label']})").classes('text-body2 text-grey-7')
 
     ui.button('Create Decision', on_click=lambda: on_create(), color='primary')
 
@@ -100,6 +112,11 @@ def render_decision_list(
 def _adapter_views(session: Session, decision_id: int) -> list[dict[str, Any]]:
     outcomes = decision_repo.list_outcomes(session, decision_id)
     variables = decision_repo.list_variables(session)
+    studies = {
+        int(study.id): study.name
+        for study in session.exec(select(Study))
+        if study.id is not None
+    }
     outcome_names = {int(outcome.id): outcome.name for outcome in outcomes if outcome.id is not None}
     variable_names = {int(variable.id): variable.name for variable in variables if variable.id is not None}
 
@@ -109,7 +126,10 @@ def _adapter_views(session: Session, decision_id: int) -> list[dict[str, Any]]:
         effects = decision_repo.list_adapters(session, adapter_set_id=int(adapter_set.id))
         predicate_groups = _predicate_groups_view(session, chains, variable_names)
         effect_text = _set_effect_text(effects, outcome_names)
-        views.append({'predicate_groups': predicate_groups, 'effect_text': effect_text})
+        study_label = None
+        if adapter_set.study_id is not None:
+            study_label = studies.get(int(adapter_set.study_id), f'#{adapter_set.study_id}')
+        views.append({'predicate_groups': predicate_groups, 'effect_text': effect_text, 'study_label': study_label})
     return views
 
 
@@ -127,6 +147,30 @@ def _decision_variable_dependencies(session: Session, decision_id: int) -> list[
                 used_variable_ids.add(int(coefficient.variable_id))
 
     return sorted(variable_names[var_id] for var_id in used_variable_ids if var_id in variable_names)
+
+
+def _decision_referenced_studies(session: Session, decision_id: int) -> list[Study]:
+    studies_by_id = {
+        int(study.id): study
+        for study in session.exec(select(Study))
+        if study.id is not None
+    }
+    seen_study_ids: set[int] = set()
+    referenced: list[Study] = []
+
+    for adapter_set in decision_repo.list_adapter_sets(session, decision_id):
+        if adapter_set.study_id is None:
+            continue
+        study_id = int(adapter_set.study_id)
+        if study_id in seen_study_ids:
+            continue
+        study = studies_by_id.get(study_id)
+        if study is None:
+            continue
+        referenced.append(study)
+        seen_study_ids.add(study_id)
+
+    return referenced
 
 
 def _predicate_groups_view(session: Session, chains, variable_names: dict[int, str]) -> list[dict[str, Any]]:

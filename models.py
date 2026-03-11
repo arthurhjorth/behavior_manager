@@ -376,6 +376,7 @@ class Study(SQLModel, table=True):
     file_path: str | None = None
 
     comments: list["StudyComment"] = Relationship(back_populates="study")
+    adapter_sets: list["AdapterSetRecord"] = Relationship(back_populates="study")
 
 
 class StudyComment(SQLModel, table=True):
@@ -511,10 +512,12 @@ class AdapterRecord(SQLModel, table=True):
 class AdapterSetRecord(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     decision_id: int = Field(foreign_key="decisionrecord.id", index=True)
+    study_id: int | None = Field(default=None, foreign_key="study.id", index=True)
     name: str = "Rule Set"
     order_index: int = 0
 
     decision: DecisionRecord | None = Relationship(back_populates="adapter_sets")
+    study: Study | None = Relationship(back_populates="adapter_sets")
     effects: list[AdapterRecord] = Relationship(back_populates="adapter_set")
     predicate_groups: list["ConditionChainRecord"] = Relationship(back_populates="adapter_set")
 
@@ -633,6 +636,17 @@ def get_engine(db_url: str = DATABASE_URL):
 def init_db(db_url: str = DATABASE_URL) -> None:
     engine = get_engine(db_url)
     SQLModel.metadata.create_all(engine)
+    _ensure_adapter_set_study_column(engine)
+
+
+def _ensure_adapter_set_study_column(engine) -> None:
+    with engine.begin() as connection:
+        columns = {
+            row[1]
+            for row in connection.exec_driver_sql('PRAGMA table_info("adaptersetrecord")').fetchall()
+        }
+        if 'study_id' not in columns:
+            connection.exec_driver_sql('ALTER TABLE "adaptersetrecord" ADD COLUMN "study_id" INTEGER')
 
 
 def get_session(db_url: str = DATABASE_URL) -> Iterator[Session]:

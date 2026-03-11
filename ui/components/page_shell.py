@@ -30,6 +30,7 @@ def _render_header(title: str) -> None:
         with ui.row().classes('items-center gap-3'):
             ui.link('Home', '/')
             ui.link('Studies', '/studies/')
+            ui.link('NetLogo', '/netlogo/procedures')
             ui.link('Decisions', '/decisions')
             ui.link('Variables', '/variables')
             ui.link('Contexts', '/contexts')
