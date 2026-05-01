@@ -51,10 +51,10 @@ def main() -> None:
     )
 
     print("\nBinary adapter comparison")
-    for age in [10, 40]:
+    for agent_age in [10, 40]:
         agent = Agent()
-        agent.my_variables.add(name="age", var_type=VarType._int, value=age)
-        run_both_paths(agent, binary_decision, age)
+        agent.my_variables.add(name="age", var_type=VarType._int, value=agent_age)
+        run_both_paths(agent, binary_decision, agent_age)
 
     linear_adapter = LinearAdapter(
         variables=[age],
