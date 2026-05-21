@@ -9,6 +9,16 @@ from repositories import decision_repo
 
 
 def export_decision_reporter(session: Session, decision_id: int) -> str:
+    return export_decision_reporter_named(session, decision_id, reporter_name=None, include_helpers=True)
+
+
+def export_decision_reporter_named(
+    session: Session,
+    decision_id: int,
+    *,
+    reporter_name: str | None,
+    include_helpers: bool,
+) -> str:
     decision = decision_repo.get_decision(session, decision_id)
     if decision is None:
         raise ValueError(f'Decision {decision_id} not found')
@@ -21,11 +31,12 @@ def export_decision_reporter(session: Session, decision_id: int) -> str:
     variable_name_by_id = {int(variable.id): variable.name for variable in variables if variable.id is not None}
     outcome_name_by_id = {int(outcome.id): outcome.name for outcome in outcomes if outcome.id is not None}
 
-    reporter_name = _sanitize_identifier(decision.name)
+    resolved_reporter_name = reporter_name or _sanitize_identifier(decision.name)
     lines: list[str] = []
-    lines.extend(_netlogo_helper_library_lines())
-    lines.append('')
-    lines.append(f'to-report {reporter_name}')
+    if include_helpers:
+        lines.extend(_netlogo_helper_library_lines())
+        lines.append('')
+    lines.append(f'to-report {resolved_reporter_name}')
     initial_rows = ' '.join(
         f'(list {_quote(outcome.name)} {_fmt(float(outcome.likelihood) if outcome.likelihood is not None else 0.0)})'
         for outcome in outcomes
@@ -56,6 +67,10 @@ def export_decision_reporter(session: Session, decision_id: int) -> str:
     lines.append('  report (bm-normalize __outcomes)')
     lines.append('end')
     return '\n'.join(lines)
+
+
+def export_helper_library() -> str:
+    return '\n'.join(_netlogo_helper_library_lines())
 
 
 def _netlogo_helper_library_lines() -> list[str]:
