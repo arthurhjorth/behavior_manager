@@ -33,6 +33,7 @@ class Procedure(ASTNode):
     name: str
     args: List[str]
     body: "Block"
+    is_reporter: bool = False
 
 @dataclass
 class Block(ASTNode):
@@ -172,14 +173,14 @@ class Parser:
         return Declaration(kind=kind, values=values)
 
     def parse_procedure(self) -> Procedure:
-        self.expect("IDENT")  # to / to-report
+        kind = self.expect("IDENT").value  # to / to-report
         name = self.expect("IDENT").value
         args = []
         if self.match("LBRACK"):
             while not self.match("RBRACK"):
                 args.append(self.expect("IDENT").value)
         body = self.parse_block_until_end()
-        return Procedure(name=name, args=args, body=body)
+        return Procedure(name=name, args=args, body=body, is_reporter=kind == "to-report")
 
     def parse_block_until_end(self) -> Block:
         stmts = []
@@ -509,6 +510,7 @@ class ProcedureSummary:
     called_by: List[str]
     args: List[str]
     variables_changed: List[str]
+    is_reporter: bool
 
     def to_dict(self) -> dict:
         return {
@@ -516,6 +518,7 @@ class ProcedureSummary:
             "called_by": self.called_by,
             "args": self.args,
             "variables_changed": self.variables_changed,
+            "is_reporter": self.is_reporter,
         }
 
 def collect_let_names(block: Block, *, sink: Optional[Set[str]] = None) -> Set[str]:
@@ -923,6 +926,7 @@ def summarize_procedures(program: Program) -> List[ProcedureSummary]:
                     memo=memo,
                 ).values()
             ),
+            is_reporter=proc.is_reporter,
         )
         for proc in program.procedures
     ]

@@ -9,7 +9,12 @@ from repositories import decision_repo
 
 
 def export_decision_reporter(session: Session, decision_id: int) -> str:
-    return export_decision_reporter_named(session, decision_id, reporter_name=None, include_helpers=True)
+    return export_decision_reporter_named(
+        session,
+        decision_id,
+        reporter_name=None,
+        include_helpers=True,
+    )
 
 
 def export_decision_reporter_named(
@@ -18,6 +23,8 @@ def export_decision_reporter_named(
     *,
     reporter_name: str | None,
     include_helpers: bool,
+    reporter_args: list[str] | None = None,
+    outcome_rows_expr: str | None = None,
 ) -> str:
     decision = decision_repo.get_decision(session, decision_id)
     if decision is None:
@@ -36,12 +43,16 @@ def export_decision_reporter_named(
     if include_helpers:
         lines.extend(_netlogo_helper_library_lines())
         lines.append('')
-    lines.append(f'to-report {resolved_reporter_name}')
-    initial_rows = ' '.join(
-        f'(list {_quote(outcome.name)} {_fmt(float(outcome.likelihood) if outcome.likelihood is not None else 0.0)})'
-        for outcome in outcomes
-    )
-    lines.append(f'  let __outcomes (list {initial_rows})')
+    signature_args = f' [{" ".join(reporter_args)}]' if reporter_args else ''
+    lines.append(f'to-report {resolved_reporter_name}{signature_args}')
+    if outcome_rows_expr is None:
+        initial_rows = ' '.join(
+            f'(list {_quote(outcome.name)} {_fmt(float(outcome.likelihood) if outcome.likelihood is not None else 0.0)})'
+            for outcome in outcomes
+        )
+        lines.append(f'  let __outcomes (list {initial_rows})')
+    else:
+        lines.append(f'  let __outcomes {outcome_rows_expr}')
 
     step_index = 0
     for adapter_set in decision_repo.list_adapter_sets(session, decision_id):

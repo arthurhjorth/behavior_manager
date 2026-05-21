@@ -429,8 +429,9 @@ def netlogo_adapters_page() -> None:
             label='Decisions',
             multiple=True,
         ).classes('w-full')
+        choices_mode = ui.checkbox('Use NetLogo choices argument mode')
         procedure_selects: dict[int, object] = {}
-        procedure_names: list[str] = []
+        procedures_by_name: dict[str, object] = {}
 
         def render_existing_mappings(model_id: int | None) -> None:
             existing_container.clear()
@@ -452,7 +453,7 @@ def netlogo_adapters_page() -> None:
                     decision_name = decision_names.get(mapping.decision_id, f'#{mapping.decision_id}')
                     ui.label(f'{decision_name} -> {mapping.procedure_name}').classes('text-body2')
 
-        def load_procedure_names(model_id: int | None) -> list[str]:
+        def load_procedures(model_id: int | None) -> list[object]:
             if model_id is None:
                 return []
             model_record = next((model for model in models if model.id == model_id), None)
@@ -463,12 +464,23 @@ def netlogo_adapters_page() -> None:
                 raise ValueError(f'Model file not found: {model_record.model_name}')
             model_text = model_path.read_text(encoding='utf-8')
             program = parse_model_text(model_text)
-            return [procedure.name for procedure in program.procedures]
+            return list(program.procedures)
+
+        def eligible_procedures(model_id: int | None) -> list[object]:
+            procedures = load_procedures(model_id)
+            if not choices_mode.value:
+                return procedures
+            return [
+                procedure
+                for procedure in procedures
+                if procedure.is_reporter and any(arg.lower() == 'choices' for arg in procedure.args)
+            ]
 
         def render_mapping_selects() -> None:
-            nonlocal procedure_names
+            nonlocal procedures_by_name
             mapping_container.clear()
             procedure_selects.clear()
+            procedures_by_name = {}
             model_id = int(selected_model.value) if selected_model.value is not None else None
             selected_ids = [int(value) for value in (selected_decisions.value or [])]
             if model_id is None or not selected_ids:
@@ -476,7 +488,7 @@ def netlogo_adapters_page() -> None:
                 return
 
             try:
-                procedure_names = load_procedure_names(model_id)
+                procedures = eligible_procedures(model_id)
             except Exception as exc:
                 status.set_text(f'Could not load procedures: {exc}')
                 render_existing_mappings(model_id)
@@ -484,10 +496,24 @@ def netlogo_adapters_page() -> None:
 
             with mapping_container:
                 ui.label('Procedure mappings').classes('text-subtitle2')
+                if not procedures:
+                    if choices_mode.value:
+                        ui.label('No reporter procedures with a `choices` argument are eligible.').classes(
+                            'text-body2 text-grey-7'
+                        )
+                    else:
+                        ui.label('No procedures found in this model.').classes('text-body2 text-grey-7')
+                    render_existing_mappings(model_id)
+                    return
+                procedures_by_name = {procedure.name: procedure for procedure in procedures}
+                procedure_options = {
+                    procedure.name: _procedure_option_label(procedure)
+                    for procedure in procedures
+                }
                 for decision_id in selected_ids:
                     decision_name = decision_options.get(decision_id, f'#{decision_id}')
                     procedure_selects[decision_id] = ui.select(
-                        {name: name for name in procedure_names},
+                        procedure_options,
                         label=decision_name,
                     ).classes('w-full')
             render_existing_mappings(model_id)
@@ -532,11 +558,21 @@ def netlogo_adapters_page() -> None:
                 replacements: dict[str, str] = {}
                 with Session(ENGINE) as session:
                     for decision_id, procedure_name in mappings:
+                        mapped_procedure = procedures_by_name.get(procedure_name)
+                        if mapped_procedure is None:
+                            raise ValueError(f'Procedure metadata missing for {procedure_name}.')
+                        export_kwargs: dict[str, object] = {}
+                        if choices_mode.value:
+                            export_kwargs = {
+                                'reporter_args': list(mapped_procedure.args),
+                                'outcome_rows_expr': 'choices',
+                            }
                         replacements[procedure_name] = netlogo_export_service.export_decision_reporter_named(
                             session,
                             decision_id,
                             reporter_name=procedure_name,
                             include_helpers=False,
+                            **export_kwargs,
                         )
 
                 generated_text = replace_procedures_in_model_text(original_text, replacements)
@@ -556,6 +592,7 @@ def netlogo_adapters_page() -> None:
 
         selected_model.on('update:model-value', lambda _: render_mapping_selects())
         selected_decisions.on('update:model-value', lambda _: render_mapping_selects())
+        choices_mode.on('update:model-value', lambda _: render_mapping_selects())
         with ui.row().classes('w-full items-center gap-2'):
             ui.button('Generate and Download', on_click=handle_generate, color='primary').props('outline')
             ui.link('How this works', '/netlogo/adapters/guide')
@@ -600,8 +637,8 @@ def netlogo_adapter_guide_page() -> None:
             'Generated Procedure',
             [
                 'Each mapping replaces the target with a `to-report` procedure named after the selected NetLogo procedure.',
-                'The generated reporter takes no arguments.',
-                'It starts with the decision outcomes and their baseline likelihoods.',
+                'The Behavior Manager choices mode generates a no-argument reporter and starts with the decision outcomes and their baseline likelihoods.',
+                'The NetLogo choices argument mode only accepts reporter procedures that already take an argument named `choices`; it preserves that reporter argument list and starts with those caller-supplied rows.',
                 'It applies every adapter set exported for that decision. Adapter-set predicates become NetLogo `if` expressions; effects update the outcome rows.',
                 'It reports normalized rows shaped like `(list (list "outcome-name" probability) ...)`.',
             ],
@@ -626,6 +663,17 @@ end''',
                 'Behavior Manager variable names are sanitized into NetLogo identifiers: spaces and unsupported characters become hyphens, names are lowercased, repeated hyphens collapse, and names starting with a digit get an `r-` prefix.',
                 'For example, `Vegetarian Default` is referenced as `vegetarian-default` in generated NetLogo code.',
                 'Variable values must have the kind expected by the exported expression: numeric values for linear coefficients and comparable values for predicates.',
+            ],
+        )
+
+        _guide_section(
+            'Choices Argument Mode',
+            [
+                'This alternate mode is for NetLogo reporters that already accept a `choices` argument.',
+                'Eligible targets must be `to-report` procedures and must include `choices` in their argument list. They may have additional arguments.',
+                '`choices` must already use Behavior Manager outcome-row shape: `(list (list "outcome-name" probability) ...)`.',
+                'The caller remains responsible for creating the baseline choice rows. Behavior Manager injects the decision conditions and active adapter effects that transform those rows.',
+                'Other preserved reporter arguments remain in the generated header but are only used if generated adapter expressions refer to in-scope NetLogo variables with the same names.',
             ],
         )
 
@@ -901,6 +949,12 @@ def _split_netlogo_procedures(code: str) -> dict[str, str]:
     for match in pattern.finditer(code.strip()):
         procedures[match.group(1)] = match.group(0).strip()
     return procedures
+
+
+def _procedure_option_label(procedure) -> str:
+    args = f' [{" ".join(procedure.args)}]' if procedure.args else ''
+    kind = 'to-report' if procedure.is_reporter else 'to'
+    return f'{kind} {procedure.name}{args}'
 
 
 def _guide_section(title: str, items: list[str]) -> None:
