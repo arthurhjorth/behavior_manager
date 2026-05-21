@@ -6,19 +6,28 @@ from nicegui import app, ui
 from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
-from netlogo_ast.main import parse_model_text, summarize_procedures
+from netlogo_ast.main import (
+    parse_model_text,
+    replace_procedures_in_model_text,
+    summarize_procedures,
+    upsert_procedures_in_model_text,
+)
 from models import (
     AdapterLikelihoodMode,
     ConditionOperator,
+    create_netlogo_model,
+    list_nl_model_adapters,
     Study,
     VarType,
     create_study,
     get_engine,
     init_db,
+    list_netlogo_models,
     list_studies,
+    replace_nl_model_adapters,
 )
 from repositories import decision_repo, variable_repo
-from services import decision_service, variable_service
+from services import decision_service, netlogo_export_service, variable_service
 from ui.components.confirm_actions import confirm_delete_button
 from ui.components.page_shell import page_shell
 from ui.pages.contexts_page import register_context_pages
@@ -31,6 +40,8 @@ from ui.views.decision.decision_form_view import ContextOption, render_decision_
 
 STUDIES_DIR = Path('studies')
 STUDIES_DIR.mkdir(parents=True, exist_ok=True)
+MODELS_DIR = Path('models')
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 init_db()
 ENGINE = get_engine()
 register_decision_pages(ENGINE)
@@ -275,9 +286,9 @@ def _pdf_files() -> list[Path]:
     )
 
 
-def _safe_destination(filename: str) -> Path:
+def _safe_destination(directory: Path, filename: str) -> Path:
     base_name = Path(filename).name
-    candidate = STUDIES_DIR / base_name
+    candidate = directory / base_name
     if not candidate.exists():
         return candidate
 
@@ -285,7 +296,7 @@ def _safe_destination(filename: str) -> Path:
     suffix = candidate.suffix
     index = 1
     while True:
-        renamed = STUDIES_DIR / f'{stem}_{index}{suffix}'
+        renamed = directory / f'{stem}_{index}{suffix}'
         if not renamed.exists():
             return renamed
         index += 1
@@ -296,22 +307,37 @@ def index() -> None:
     with page_shell(title='Home', breadcrumb_path='/', max_width_class='max-w-3xl'):
         ui.label('Choose a section').classes('text-body1')
         ui.link('Go to studies', '/studies/')
-        ui.link('Go to NetLogo procedures', '/netlogo/procedures')
+        ui.link('Go to NetLogo models', '/netlogo/models')
+        ui.link('Go to NetLogo adapters', '/netlogo/adapters')
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
         ui.link('Go to contexts', '/contexts')
         ui.link('Go to datasets', '/datasets')
 
 
-@ui.page('/netlogo/procedures')
-def netlogo_procedures_page() -> None:
+@ui.page('/netlogo/models')
+def netlogo_models_page() -> None:
     with page_shell(
-        title='NetLogo Procedures',
-        breadcrumb_path='/netlogo/procedures',
+        title='NetLogo Models',
+        breadcrumb_path='/netlogo/models',
         max_width_class='max-w-5xl',
     ):
         status = ui.label('Upload a `.nlogo`/`.nlogox` model or a plain NetLogo source file.').classes('text-body2')
+        model_list_container = ui.column().classes('w-full gap-2')
         results_container = ui.column().classes('w-full gap-2')
+
+        def render_model_list() -> None:
+            model_list_container.clear()
+            with Session(ENGINE) as session:
+                stored_models = list_netlogo_models(session)
+            with model_list_container:
+                ui.label('Saved models').classes('text-subtitle2')
+                if not stored_models:
+                    ui.label('No NetLogo models uploaded yet.')
+                    return
+                for model in stored_models:
+                    with ui.row().classes('w-full items-center justify-between border rounded p-2'):
+                        ui.label(model.model_name).classes('text-body2')
 
         def render_results(filename: str, procedures: list[object]) -> None:
             results_container.clear()
@@ -349,6 +375,10 @@ def netlogo_procedures_page() -> None:
                 model_text = temp_path.read_text(encoding='utf-8')
                 program = parse_model_text(model_text)
                 procedures = summarize_procedures(program)
+                destination = _safe_destination(MODELS_DIR, event.file.name)
+                destination.write_bytes(temp_path.read_bytes())
+                with Session(ENGINE) as session:
+                    create_netlogo_model(session, model_name=destination.name)
             except UnicodeDecodeError:
                 status.set_text('Could not read file as UTF-8 text.')
                 return
@@ -359,9 +389,179 @@ def netlogo_procedures_page() -> None:
                 temp_path.unlink(missing_ok=True)
 
             status.set_text(f'Parsed {Path(event.file.name).name}.')
+            render_model_list()
             render_results(Path(event.file.name).name, procedures)
 
         ui.upload(on_upload=handle_upload, auto_upload=True).props('accept=.nlogo,.nlogox,.txt,.nl,.netlogo')
+        render_model_list()
+
+
+@ui.page('/netlogo/adapters')
+def netlogo_adapters_page() -> None:
+    with page_shell(
+        title='NetLogo Adapters',
+        breadcrumb_path='/netlogo/adapters',
+        max_width_class='max-w-5xl',
+    ):
+        status = ui.label('Choose a model, map decisions to procedures, and download a generated model.').classes('text-body2')
+        mapping_container = ui.column().classes('w-full gap-3')
+        existing_container = ui.column().classes('w-full gap-2')
+
+        with Session(ENGINE) as session:
+            models = list_netlogo_models(session)
+            decisions = decision_repo.list_decisions(session)
+
+        model_options = {
+            int(model.id): model.model_name
+            for model in models
+            if model.id is not None
+        }
+        decision_options = {
+            int(decision.id): decision.name
+            for decision in decisions
+            if decision.id is not None
+        }
+
+        selected_model = ui.select(model_options, label='Model').classes('w-full')
+        selected_decisions = ui.select(
+            decision_options,
+            label='Decisions',
+            multiple=True,
+        ).classes('w-full')
+        procedure_selects: dict[int, object] = {}
+        procedure_names: list[str] = []
+
+        def render_existing_mappings(model_id: int | None) -> None:
+            existing_container.clear()
+            if model_id is None:
+                return
+            with Session(ENGINE) as session:
+                mappings = list_nl_model_adapters(session, model_id)
+                decision_names = {
+                    int(decision.id): decision.name
+                    for decision in decision_repo.list_decisions(session)
+                    if decision.id is not None
+                }
+            with existing_container:
+                ui.label('Saved mappings').classes('text-subtitle2')
+                if not mappings:
+                    ui.label('No saved mappings for this model.')
+                    return
+                for mapping in mappings:
+                    decision_name = decision_names.get(mapping.decision_id, f'#{mapping.decision_id}')
+                    ui.label(f'{decision_name} -> {mapping.procedure_name}').classes('text-body2')
+
+        def load_procedure_names(model_id: int | None) -> list[str]:
+            if model_id is None:
+                return []
+            model_record = next((model for model in models if model.id == model_id), None)
+            if model_record is None:
+                return []
+            model_path = MODELS_DIR / model_record.model_name
+            if not model_path.exists():
+                raise ValueError(f'Model file not found: {model_record.model_name}')
+            model_text = model_path.read_text(encoding='utf-8')
+            program = parse_model_text(model_text)
+            return [procedure.name for procedure in program.procedures]
+
+        def render_mapping_selects() -> None:
+            nonlocal procedure_names
+            mapping_container.clear()
+            procedure_selects.clear()
+            model_id = int(selected_model.value) if selected_model.value is not None else None
+            selected_ids = [int(value) for value in (selected_decisions.value or [])]
+            if model_id is None or not selected_ids:
+                render_existing_mappings(model_id)
+                return
+
+            try:
+                procedure_names = load_procedure_names(model_id)
+            except Exception as exc:
+                status.set_text(f'Could not load procedures: {exc}')
+                render_existing_mappings(model_id)
+                return
+
+            with mapping_container:
+                ui.label('Procedure mappings').classes('text-subtitle2')
+                for decision_id in selected_ids:
+                    decision_name = decision_options.get(decision_id, f'#{decision_id}')
+                    procedure_selects[decision_id] = ui.select(
+                        {name: name for name in procedure_names},
+                        label=decision_name,
+                    ).classes('w-full')
+            render_existing_mappings(model_id)
+
+        def handle_generate() -> None:
+            if selected_model.value is None:
+                status.set_text('Choose a model first.')
+                return
+
+            model_id = int(selected_model.value)
+            selected_ids = [int(value) for value in (selected_decisions.value or [])]
+            if not selected_ids:
+                status.set_text('Choose at least one decision.')
+                return
+
+            mappings: list[tuple[int, str]] = []
+            used_procedures: set[str] = set()
+            for decision_id in selected_ids:
+                control = procedure_selects.get(decision_id)
+                procedure_name = str(control.value or '').strip() if control is not None else ''
+                if not procedure_name:
+                    status.set_text('Each selected decision must be mapped to a procedure.')
+                    return
+                if procedure_name in used_procedures:
+                    status.set_text('Each procedure can only be mapped once per generated model.')
+                    return
+                used_procedures.add(procedure_name)
+                mappings.append((decision_id, procedure_name))
+
+            model_record = next((model for model in models if model.id == model_id), None)
+            if model_record is None:
+                status.set_text('Selected model was not found.')
+                return
+
+            model_path = MODELS_DIR / model_record.model_name
+            if not model_path.exists():
+                status.set_text(f'Model file not found: {model_record.model_name}')
+                return
+
+            try:
+                original_text = model_path.read_text(encoding='utf-8')
+                replacements: dict[str, str] = {}
+                with Session(ENGINE) as session:
+                    for decision_id, procedure_name in mappings:
+                        replacements[procedure_name] = netlogo_export_service.export_decision_reporter_named(
+                            session,
+                            decision_id,
+                            reporter_name=procedure_name,
+                            include_helpers=False,
+                        )
+
+                generated_text = replace_procedures_in_model_text(original_text, replacements)
+                helper_program = netlogo_export_service.export_helper_library()
+                helper_blocks = _split_netlogo_procedures(helper_program)
+                generated_text = upsert_procedures_in_model_text(generated_text, helper_blocks)
+                with Session(ENGINE) as session:
+                    replace_nl_model_adapters(session, model_id, mappings)
+            except Exception as exc:
+                status.set_text(f'Generation failed: {exc}')
+                return
+
+            download_name = f'{Path(model_record.model_name).stem}_generated{Path(model_record.model_name).suffix}'
+            ui.download(generated_text.encode('utf-8'), filename=download_name, media_type='text/plain')
+            status.set_text(f'Generated {download_name}.')
+            render_existing_mappings(model_id)
+
+        selected_model.on('update:model-value', lambda _: render_mapping_selects())
+        selected_decisions.on('update:model-value', lambda _: render_mapping_selects())
+        ui.button('Generate and Download', on_click=handle_generate, color='primary').props('outline')
+        render_mapping_selects()
+
+
+@ui.page('/netlogo/procedures')
+def netlogo_procedures_redirect() -> None:
+    ui.navigate.to('/netlogo/models')
 
 
 @ui.page('/studies/')
@@ -393,7 +593,7 @@ def studies_page() -> None:
                 status.set_text('Upload rejected: only .pdf files are allowed.')
                 return
 
-            destination = _safe_destination(filename)
+            destination = _safe_destination(STUDIES_DIR, filename)
             await event.file.save(destination)
             with Session(ENGINE) as session:
                 create_study(session, name=destination.stem, file_path=str(destination))
@@ -600,7 +800,17 @@ def _delete_adapter_set_from_study(study_id: int, _decision_id: int, adapter_set
     ui.navigate.to(f'/studies/{study_id}')
 
 
+def _split_netlogo_procedures(code: str) -> dict[str, str]:
+    import re
+
+    pattern = re.compile(r'(?ims)^[ \t]*(?:to|to-report)\s+([A-Za-z_][A-Za-z0-9_\-\?\!]*)[\s\S]*?^[ \t]*end[ \t]*$')
+    procedures: dict[str, str] = {}
+    for match in pattern.finditer(code.strip()):
+        procedures[match.group(1)] = match.group(0).strip()
+    return procedures
+
+
 if __name__ in {'__main__', '__mp_main__'}:
-    ui.run(prod_js=False)
+    ui.run(prod_js=False, port=8002)
 else:
     ui.run_with(app, prod_js=False)
