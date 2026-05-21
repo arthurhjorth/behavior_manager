@@ -429,7 +429,6 @@ def netlogo_adapters_page() -> None:
             label='Decisions',
             multiple=True,
         ).classes('w-full')
-        choices_mode = ui.checkbox('Use NetLogo choices argument mode')
         procedure_selects: dict[int, object] = {}
         procedures_by_name: dict[str, object] = {}
 
@@ -468,12 +467,10 @@ def netlogo_adapters_page() -> None:
 
         def eligible_procedures(model_id: int | None) -> list[object]:
             procedures = load_procedures(model_id)
-            if not choices_mode.value:
-                return procedures
             return [
                 procedure
                 for procedure in procedures
-                if procedure.is_reporter and any(arg.lower() == 'choices' for arg in procedure.args)
+                if procedure.is_reporter and [arg.lower() for arg in procedure.args] == ['choices']
             ]
 
         def render_mapping_selects() -> None:
@@ -497,12 +494,9 @@ def netlogo_adapters_page() -> None:
             with mapping_container:
                 ui.label('Procedure mappings').classes('text-subtitle2')
                 if not procedures:
-                    if choices_mode.value:
-                        ui.label('No reporter procedures with a `choices` argument are eligible.').classes(
-                            'text-body2 text-grey-7'
-                        )
-                    else:
-                        ui.label('No procedures found in this model.').classes('text-body2 text-grey-7')
+                    ui.label('No reporter procedures with one `choices` argument are eligible.').classes(
+                        'text-body2 text-grey-7'
+                    )
                     render_existing_mappings(model_id)
                     return
                 procedures_by_name = {procedure.name: procedure for procedure in procedures}
@@ -561,18 +555,13 @@ def netlogo_adapters_page() -> None:
                         mapped_procedure = procedures_by_name.get(procedure_name)
                         if mapped_procedure is None:
                             raise ValueError(f'Procedure metadata missing for {procedure_name}.')
-                        export_kwargs: dict[str, object] = {}
-                        if choices_mode.value:
-                            export_kwargs = {
-                                'reporter_args': list(mapped_procedure.args),
-                                'outcome_rows_expr': 'choices',
-                            }
                         replacements[procedure_name] = netlogo_export_service.export_decision_reporter_named(
                             session,
                             decision_id,
                             reporter_name=procedure_name,
                             include_helpers=False,
-                            **export_kwargs,
+                            reporter_args=list(mapped_procedure.args),
+                            outcome_rows_expr='choices',
                         )
 
                 generated_text = replace_procedures_in_model_text(original_text, replacements)
@@ -592,7 +581,6 @@ def netlogo_adapters_page() -> None:
 
         selected_model.on('update:model-value', lambda _: render_mapping_selects())
         selected_decisions.on('update:model-value', lambda _: render_mapping_selects())
-        choices_mode.on('update:model-value', lambda _: render_mapping_selects())
         with ui.row().classes('w-full items-center gap-2'):
             ui.button('Generate and Download', on_click=handle_generate, color='primary').props('outline')
             ui.link('How this works', '/netlogo/adapters/guide')
@@ -608,46 +596,49 @@ def netlogo_adapter_guide_page() -> None:
     ):
         ui.label('NetLogo decision injection').classes('text-h5')
         ui.label(
-            'This workflow exports Behavior Manager decisions into an uploaded NetLogo model and downloads a generated copy.'
+            'This page describes the NetLogo modelling contract for injecting Behavior Manager decisions.'
         ).classes('text-body1')
 
         _guide_section(
-            'Workflow',
+            'What Happens To Procedures',
             [
-                'Upload the source model on the NetLogo Models page.',
-                'Create or edit Behavior Manager decisions, outcomes, variables, conditions, and adapter effects.',
-                'Open NetLogo Adapters, choose one saved model, and select one or more decisions.',
-                'Map every selected decision to an existing procedure in that model.',
-                'Generate the model. The source upload stays unchanged; the browser downloads a generated copy.',
+                'A decision is mapped to one existing procedure in the NetLogo model.',
+                'Generation replaces that whole procedure block, from its `to-report` header through its matching `end`.',
+                'The original body is not merged with the generated body. Put behaviour that must survive outside the injected procedure.',
+                'The replacement is always a reporter. It returns normalized outcome rows for the mapped decision.',
+                'The generated model also receives the shared `bm-*` reporter helpers used by injected procedures.',
             ],
         )
 
         _guide_section(
-            'Model Requirements',
+            'Procedure Requirements',
             [
-                'The uploaded model must be UTF-8 text that the NetLogo parser can read.',
-                'For `.nlogox`, code must live in the XML `<model><code>...</code></model>` element.',
-                'For `.nlogo`, the Code tab must be the first model section before the `@#$#@#$#@` separator.',
-                'Every target procedure must already exist in the uploaded model so it appears in the mapping selector.',
-                'The target procedure is replaced completely. Its original body, header, arguments, and command/reporter kind are not preserved.',
+                'The target must be a named NetLogo procedure that the parser can find in the model code.',
+                'The target must be a `to-report` reporter.',
+                'The target must have exactly one argument, named `choices`.',
+                'Each generated decision must use a different target procedure in the same model.',
             ],
         )
 
         _guide_section(
-            'Generated Procedure',
+            'Choices',
             [
-                'Each mapping replaces the target with a `to-report` procedure named after the selected NetLogo procedure.',
-                'The Behavior Manager choices mode generates a no-argument reporter and starts with the decision outcomes and their baseline likelihoods.',
-                'The NetLogo choices argument mode only accepts reporter procedures that already take an argument named `choices`; it preserves that reporter argument list and starts with those caller-supplied rows.',
-                'It applies every adapter set exported for that decision. Adapter-set predicates become NetLogo `if` expressions; effects update the outcome rows.',
-                'It reports normalized rows shaped like `(list (list "outcome-name" probability) ...)`.',
+                '`choices` is the initial outcome-row list supplied by the NetLogo model.',
+                'It must be rows shaped like `(list (list "outcome-name" probability) ...)`.',
+                'The generated reporter starts from those incoming rows rather than creating model choices itself.',
+                'The model remains responsible for constructing and passing those rows.',
             ],
         )
 
         _guide_code(
-            'Shape of a generated reporter',
-            '''to-report choose-lunch
-  let __outcomes (list (list "meat" 0.5) (list "vegetarian" 0.5))
+            'Procedure shape before and after injection',
+            '''to-report choose-lunch [choices]
+  report choices
+end
+
+;; after injection
+to-report choose-lunch [choices]
+  let __outcomes choices
   if ((reducer = true)) [
     set __outcomes (bm-apply-multiply __outcomes "vegetarian" 1.5)
   ]
@@ -656,42 +647,32 @@ end''',
         )
 
         _guide_section(
+            'Adapter Logic',
+            [
+                'Adapter-set conditions become NetLogo `if` expressions inside the replacement reporter.',
+                'Active adapter effects transform the outcome rows through generated `bm-*` helper calls.',
+                'The reporter normalizes rows before it reports them.',
+                'If the model already has a helper procedure with the same `bm-*` name, it is replaced with the generated helper.',
+            ],
+        )
+
+        _guide_section(
             'Variable Assumptions',
             [
-                'The exporter does not create NetLogo globals, turtle variables, patch variables, or local variables.',
-                'Every Behavior Manager variable used by conditions or linear adapter coefficients must already be valid in the NetLogo scope where the generated reporter runs.',
+                'Injection does not create NetLogo globals, turtle variables, patch variables, or local variables for adapter expressions.',
+                'Every Behavior Manager variable used by conditions or linear adapter coefficients must already be valid in the scope where the generated reporter runs.',
                 'Behavior Manager variable names are sanitized into NetLogo identifiers: spaces and unsupported characters become hyphens, names are lowercased, repeated hyphens collapse, and names starting with a digit get an `r-` prefix.',
                 'For example, `Vegetarian Default` is referenced as `vegetarian-default` in generated NetLogo code.',
-                'Variable values must have the kind expected by the exported expression: numeric values for linear coefficients and comparable values for predicates.',
+                'Variable values must have the kind expected by the generated expression: numeric values for linear coefficients and comparable values for predicates.',
             ],
         )
 
         _guide_section(
-            'Choices Argument Mode',
+            'Model Code',
             [
-                'This alternate mode is for NetLogo reporters that already accept a `choices` argument.',
-                'Eligible targets must be `to-report` procedures and must include `choices` in their argument list. They may have additional arguments.',
-                '`choices` must already use Behavior Manager outcome-row shape: `(list (list "outcome-name" probability) ...)`.',
-                'The caller remains responsible for creating the baseline choice rows. Behavior Manager injects the decision conditions and active adapter effects that transform those rows.',
-                'Other preserved reporter arguments remain in the generated header but are only used if generated adapter expressions refer to in-scope NetLogo variables with the same names.',
-            ],
-        )
-
-        _guide_section(
-            'Helper Procedures',
-            [
-                'The generated model receives shared `bm-*` reporters used to set, multiply, add points, probability-multiply, and normalize outcome rows.',
-                'If a helper procedure with the same name already exists in the model, generation replaces it with the Behavior Manager version.',
-                'The generated decision reporter depends on those helpers. Removing them from the downloaded model breaks the injected reporter.',
-            ],
-        )
-
-        _guide_section(
-            'What Is Saved',
-            [
-                'The uploaded source file remains in the server models folder and is not overwritten by generation.',
-                'Generation saves the selected model, decision, and procedure mappings as NetLogo adapter rows in the database.',
-                'The generated model itself is downloaded by the browser. It is not saved back as a new stored NetLogo model.',
+                'For `.nlogox`, injectable procedures must be in the XML `<model><code>...</code></model>` code element.',
+                'For `.nlogo`, injectable procedures must be in the Code tab section before the `@#$#@#$#@` separator.',
+                'The model source must be readable as UTF-8 text and the target procedure must parse well enough to appear in the procedure selector.',
             ],
         )
 
