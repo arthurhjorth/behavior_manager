@@ -884,3 +884,64 @@ def _apply_probability_multiply(outcomes: list[Outcome], target_outcome: str, fa
         share = outcome.likelihood / remaining_old
         updated.append(Outcome(name=outcome.name, likelihood=share * remaining_new))
     return updated
+
+class NetLogoModel(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    model_name: str
+
+
+class NLModelAdapter(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    netlogo_model_id: int = Field(foreign_key="netlogomodel.id", index=True)
+    decision_id: int = Field(foreign_key="decisionrecord.id", index=True)
+    procedure_name: str
+
+
+def create_netlogo_model(session: Session, model_name: str) -> NetLogoModel:
+    model = NetLogoModel(model_name=model_name)
+    session.add(model)
+    session.commit()
+    session.refresh(model)
+    return model
+
+
+def list_netlogo_models(session: Session) -> list[NetLogoModel]:
+    return list(session.exec(select(NetLogoModel).order_by(NetLogoModel.model_name)))
+
+
+def replace_nl_model_adapters(
+    session: Session,
+    netlogo_model_id: int,
+    mappings: list[tuple[int, str]],
+) -> list[NLModelAdapter]:
+    existing = list(
+        session.exec(
+            select(NLModelAdapter).where(NLModelAdapter.netlogo_model_id == netlogo_model_id)
+        )
+    )
+    for row in existing:
+        session.delete(row)
+    session.commit()
+
+    created: list[NLModelAdapter] = []
+    for decision_id, procedure_name in mappings:
+        row = NLModelAdapter(
+            netlogo_model_id=netlogo_model_id,
+            decision_id=decision_id,
+            procedure_name=procedure_name,
+        )
+        session.add(row)
+        created.append(row)
+    session.commit()
+    for row in created:
+        session.refresh(row)
+    return created
+
+
+def list_nl_model_adapters(session: Session, netlogo_model_id: int) -> list[NLModelAdapter]:
+    statement = (
+        select(NLModelAdapter)
+        .where(NLModelAdapter.netlogo_model_id == netlogo_model_id)
+        .order_by(NLModelAdapter.id)
+    )
+    return list(session.exec(statement))
