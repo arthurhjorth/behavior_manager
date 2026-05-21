@@ -405,8 +405,6 @@ def netlogo_adapters_page() -> None:
         max_width_class='max-w-5xl',
     ):
         status = ui.label('Choose a model, map decisions to procedures, and download a generated model.').classes('text-body2')
-        mapping_container = ui.column().classes('w-full gap-3')
-        existing_container = ui.column().classes('w-full gap-2')
 
         with Session(ENGINE) as session:
             models = list_netlogo_models(session)
@@ -429,6 +427,8 @@ def netlogo_adapters_page() -> None:
             label='Decisions',
             multiple=True,
         ).classes('w-full')
+        mapping_container = ui.column().classes('w-full gap-3')
+        existing_container = ui.column().classes('w-full gap-2')
         procedure_selects: dict[int, object] = {}
         procedures_by_name: dict[str, object] = {}
 
