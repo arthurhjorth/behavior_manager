@@ -309,6 +309,7 @@ def index() -> None:
         ui.link('Go to studies', '/studies/')
         ui.link('Go to NetLogo models', '/netlogo/models')
         ui.link('Go to NetLogo adapters', '/netlogo/adapters')
+        ui.link('Read the NetLogo adapter guide', '/netlogo/adapters/guide')
         ui.link('Go to decisions', '/decisions')
         ui.link('Go to variables', '/variables')
         ui.link('Go to contexts', '/contexts')
@@ -555,8 +556,100 @@ def netlogo_adapters_page() -> None:
 
         selected_model.on('update:model-value', lambda _: render_mapping_selects())
         selected_decisions.on('update:model-value', lambda _: render_mapping_selects())
-        ui.button('Generate and Download', on_click=handle_generate, color='primary').props('outline')
+        with ui.row().classes('w-full items-center gap-2'):
+            ui.button('Generate and Download', on_click=handle_generate, color='primary').props('outline')
+            ui.link('How this works', '/netlogo/adapters/guide')
         render_mapping_selects()
+
+
+@ui.page('/netlogo/adapters/guide')
+def netlogo_adapter_guide_page() -> None:
+    with page_shell(
+        title='NetLogo Adapter Guide',
+        breadcrumb_path='/netlogo/adapters/guide',
+        max_width_class='max-w-5xl',
+    ):
+        ui.label('NetLogo decision injection').classes('text-h5')
+        ui.label(
+            'This workflow exports Behavior Manager decisions into an uploaded NetLogo model and downloads a generated copy.'
+        ).classes('text-body1')
+
+        _guide_section(
+            'Workflow',
+            [
+                'Upload the source model on the NetLogo Models page.',
+                'Create or edit Behavior Manager decisions, outcomes, variables, conditions, and adapter effects.',
+                'Open NetLogo Adapters, choose one saved model, and select one or more decisions.',
+                'Map every selected decision to an existing procedure in that model.',
+                'Generate the model. The source upload stays unchanged; the browser downloads a generated copy.',
+            ],
+        )
+
+        _guide_section(
+            'Model Requirements',
+            [
+                'The uploaded model must be UTF-8 text that the NetLogo parser can read.',
+                'For `.nlogox`, code must live in the XML `<model><code>...</code></model>` element.',
+                'For `.nlogo`, the Code tab must be the first model section before the `@#$#@#$#@` separator.',
+                'Every target procedure must already exist in the uploaded model so it appears in the mapping selector.',
+                'The target procedure is replaced completely. Its original body, header, arguments, and command/reporter kind are not preserved.',
+            ],
+        )
+
+        _guide_section(
+            'Generated Procedure',
+            [
+                'Each mapping replaces the target with a `to-report` procedure named after the selected NetLogo procedure.',
+                'The generated reporter takes no arguments.',
+                'It starts with the decision outcomes and their baseline likelihoods.',
+                'It applies every adapter set exported for that decision. Adapter-set predicates become NetLogo `if` expressions; effects update the outcome rows.',
+                'It reports normalized rows shaped like `(list (list "outcome-name" probability) ...)`.',
+            ],
+        )
+
+        _guide_code(
+            'Shape of a generated reporter',
+            '''to-report choose-lunch
+  let __outcomes (list (list "meat" 0.5) (list "vegetarian" 0.5))
+  if ((reducer = true)) [
+    set __outcomes (bm-apply-multiply __outcomes "vegetarian" 1.5)
+  ]
+  report (bm-normalize __outcomes)
+end''',
+        )
+
+        _guide_section(
+            'Variable Assumptions',
+            [
+                'The exporter does not create NetLogo globals, turtle variables, patch variables, or local variables.',
+                'Every Behavior Manager variable used by conditions or linear adapter coefficients must already be valid in the NetLogo scope where the generated reporter runs.',
+                'Behavior Manager variable names are sanitized into NetLogo identifiers: spaces and unsupported characters become hyphens, names are lowercased, repeated hyphens collapse, and names starting with a digit get an `r-` prefix.',
+                'For example, `Vegetarian Default` is referenced as `vegetarian-default` in generated NetLogo code.',
+                'Variable values must have the kind expected by the exported expression: numeric values for linear coefficients and comparable values for predicates.',
+            ],
+        )
+
+        _guide_section(
+            'Helper Procedures',
+            [
+                'The generated model receives shared `bm-*` reporters used to set, multiply, add points, probability-multiply, and normalize outcome rows.',
+                'If a helper procedure with the same name already exists in the model, generation replaces it with the Behavior Manager version.',
+                'The generated decision reporter depends on those helpers. Removing them from the downloaded model breaks the injected reporter.',
+            ],
+        )
+
+        _guide_section(
+            'What Is Saved',
+            [
+                'The uploaded source file remains in the server models folder and is not overwritten by generation.',
+                'Generation saves the selected model, decision, and procedure mappings as NetLogo adapter rows in the database.',
+                'The generated model itself is downloaded by the browser. It is not saved back as a new stored NetLogo model.',
+            ],
+        )
+
+        with ui.row().classes('w-full gap-2'):
+            ui.link('Upload models', '/netlogo/models')
+            ui.link('Create NetLogo adapters', '/netlogo/adapters')
 
 
 @ui.page('/netlogo/procedures')
@@ -808,6 +901,20 @@ def _split_netlogo_procedures(code: str) -> dict[str, str]:
     for match in pattern.finditer(code.strip()):
         procedures[match.group(1)] = match.group(0).strip()
     return procedures
+
+
+def _guide_section(title: str, items: list[str]) -> None:
+    with ui.column().classes('w-full gap-1'):
+        ui.label(title).classes('text-h6')
+        with ui.column().classes('w-full gap-1 pl-4'):
+            for item in items:
+                ui.label(f'- {item}').classes('text-body2')
+
+
+def _guide_code(title: str, code: str) -> None:
+    with ui.column().classes('w-full gap-1'):
+        ui.label(title).classes('text-h6')
+        ui.code(code).classes('w-full')
 
 
 if __name__ in {'__main__', '__mp_main__'}:
