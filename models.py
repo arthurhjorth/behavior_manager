@@ -801,6 +801,331 @@ class PopulationPersonWeightRecord(SQLModel, table=True):
     person: PopulationPersonRecord | None = Relationship(back_populates="weights")
 
 
+class PopulationMappingStatus(str, Enum):
+    draft = "draft"
+    approved = "approved"
+    rejected = "rejected"
+    disabled = "disabled"
+
+
+class PopulationTransformKind(str, Enum):
+    identity = "identity"
+    identity_numeric = "identity_numeric"
+    identity_category = "identity_category"
+    normalize_minmax = "normalize_minmax"
+    category_to_interval = "category_to_interval"
+    category_recode = "category_recode"
+    binary_recode = "binary_recode"
+    multi_input_vector = "multi_input_vector"
+    derive_adults_children = "derive_adults_children"
+    collapse_household_age_counts = "collapse_household_age_counts"
+    custom = "custom"
+
+
+class PopulationComparatorKind(str, Enum):
+    scaled_absolute_distance = "scaled_absolute_distance"
+    exact_match = "exact_match"
+    binary_mismatch = "binary_mismatch"
+    jaccard_distance = "jaccard_distance"
+    numeric_to_interval_distance = "numeric_to_interval_distance"
+    interval_overlap_distance = "interval_overlap_distance"
+    weighted_component_distance = "weighted_component_distance"
+    custom = "custom"
+
+
+class PopulationComparableValueKind(str, Enum):
+    number = "number"
+    category = "category"
+    boolean = "boolean"
+    text = "text"
+    list = "list"
+    interval = "interval"
+    vector = "vector"
+    object = "object"
+
+
+class PopulationMissingPolicy(str, Enum):
+    pairwise_ignore = "pairwise_ignore"
+    penalize = "penalize"
+    require = "require"
+
+
+class PopulationMatchingMethod(str, Enum):
+    weighted_knn = "weighted_knn"
+
+
+class PopulationReplacementPolicy(str, Enum):
+    allow_reuse = "allow_reuse"
+    one_to_one = "one_to_one"
+    capped_reuse = "capped_reuse"
+
+
+class PopulationParameterValueKind(str, Enum):
+    string = "string"
+    number = "number"
+    integer = "integer"
+    boolean = "boolean"
+    null = "null"
+
+
+class PopulationMatchingWorkspaceRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    schema_version: str = "0.2.0"
+    name: str
+    description: str | None = None
+    dataset_fingerprint: str | None = None
+    primary_source_study_id: int | None = Field(default=None, foreign_key="populationstudyrecord.id", index=True)
+    primary_target_study_id: int | None = Field(default=None, foreign_key="populationstudyrecord.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    studies: list["PopulationWorkspaceStudyRecord"] = Relationship(back_populates="workspace")
+    matching_defaults: Optional["PopulationMatchingDefaultRecord"] = Relationship(back_populates="workspace")
+    diagnostics: Optional["PopulationDiagnosticsRecord"] = Relationship(back_populates="workspace")
+    mappings: list["PopulationVariableSetMappingRecord"] = Relationship(back_populates="workspace")
+    notes: list["PopulationWorkspaceNoteRecord"] = Relationship(back_populates="workspace")
+    audit_events: list["PopulationWorkspaceAuditEventRecord"] = Relationship(back_populates="workspace")
+    runs: list["PopulationMatchRunRecord"] = Relationship(back_populates="workspace")
+
+
+class PopulationWorkspaceStudyRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("workspace_id", "study_id", name="uq_population_workspace_study"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    order_index: int = 0
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="studies")
+    study: PopulationStudyRecord | None = Relationship()
+
+
+class PopulationMatchingDefaultRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("workspace_id", name="uq_population_workspace_matching_defaults"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    method: PopulationMatchingMethod = PopulationMatchingMethod.weighted_knn
+    k: int = 5
+    source_study_id: int | None = Field(default=None, foreign_key="populationstudyrecord.id", index=True)
+    target_study_id: int | None = Field(default=None, foreign_key="populationstudyrecord.id", index=True)
+    replacement_policy: PopulationReplacementPolicy = PopulationReplacementPolicy.allow_reuse
+    capped_reuse_limit: int | None = None
+    caliper: float | None = None
+    missing_policy: PopulationMissingPolicy = PopulationMissingPolicy.pairwise_ignore
+    normalize_weights: bool = True
+    random_seed: int = 42
+    notes: str | None = None
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="matching_defaults")
+
+
+class PopulationDiagnosticsRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("workspace_id", name="uq_population_workspace_diagnostics"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    compare_distributions: bool = True
+    show_worst_matches: bool = True
+    show_feature_contributions: bool = True
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="diagnostics")
+    balance_variables: list["PopulationDiagnosticsBalanceVariableRecord"] = Relationship(back_populates="diagnostics")
+
+
+class PopulationDiagnosticsBalanceVariableRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("diagnostics_id", "variable_name", name="uq_population_diagnostics_balance"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    diagnostics_id: int = Field(foreign_key="populationdiagnosticsrecord.id", index=True)
+    variable_name: str
+
+    diagnostics: PopulationDiagnosticsRecord | None = Relationship(back_populates="balance_variables")
+
+
+class PopulationVariableSetMappingRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    name: str
+    description: str | None = None
+    left_study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    right_study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    output_kind: PopulationComparableValueKind = PopulationComparableValueKind.number
+    weight: float = 1.0
+    status: PopulationMappingStatus = PopulationMappingStatus.approved
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="mappings")
+    inputs: list["PopulationMappingInputRecord"] = Relationship(back_populates="mapping")
+    transforms: list["PopulationTransformSpecRecord"] = Relationship(back_populates="mapping")
+    comparator: Optional["PopulationComparatorSpecRecord"] = Relationship(back_populates="mapping")
+
+
+class PopulationMappingInputRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    mapping_id: int = Field(foreign_key="populationvariablesetmappingrecord.id", index=True)
+    question_id: int = Field(foreign_key="populationquestionrecord.id", index=True)
+    side: str
+    alias: str
+    required: bool = True
+    order_index: int = 0
+
+    mapping: PopulationVariableSetMappingRecord | None = Relationship(back_populates="inputs")
+    question: PopulationQuestionRecord | None = Relationship()
+
+
+class PopulationTransformSpecRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("mapping_id", "side", name="uq_population_mapping_transform_side"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    mapping_id: int = Field(foreign_key="populationvariablesetmappingrecord.id", index=True)
+    side: str
+    kind: PopulationTransformKind = PopulationTransformKind.identity
+    output_alias: str = "value"
+    notes: str | None = None
+
+    mapping: PopulationVariableSetMappingRecord | None = Relationship(back_populates="transforms")
+    input_aliases: list["PopulationTransformInputAliasRecord"] = Relationship(back_populates="transform")
+    parameters: list["PopulationSpecParameterRecord"] = Relationship(back_populates="transform")
+
+
+class PopulationTransformInputAliasRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("transform_id", "order_index", name="uq_population_transform_alias_order"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    transform_id: int = Field(foreign_key="populationtransformspecrecord.id", index=True)
+    alias: str
+    order_index: int = 0
+
+    transform: PopulationTransformSpecRecord | None = Relationship(back_populates="input_aliases")
+
+
+class PopulationComparatorSpecRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("mapping_id", name="uq_population_mapping_comparator"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    mapping_id: int = Field(foreign_key="populationvariablesetmappingrecord.id", index=True)
+    kind: PopulationComparatorKind = PopulationComparatorKind.exact_match
+    missing_policy: PopulationMissingPolicy = PopulationMissingPolicy.pairwise_ignore
+    notes: str | None = None
+
+    mapping: PopulationVariableSetMappingRecord | None = Relationship(back_populates="comparator")
+    parameters: list["PopulationSpecParameterRecord"] = Relationship(back_populates="comparator")
+
+
+class PopulationSpecParameterRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    transform_id: int | None = Field(default=None, foreign_key="populationtransformspecrecord.id", index=True)
+    comparator_id: int | None = Field(default=None, foreign_key="populationcomparatorspecrecord.id", index=True)
+    parent_id: int | None = Field(default=None, foreign_key="populationspecparameterrecord.id", index=True)
+    key: str | None = None
+    order_index: int = 0
+    value_kind: PopulationParameterValueKind = PopulationParameterValueKind.null
+    value_string: str | None = None
+    value_number: float | None = None
+    value_integer: int | None = None
+    value_bool: bool | None = None
+
+    transform: PopulationTransformSpecRecord | None = Relationship(back_populates="parameters")
+    comparator: PopulationComparatorSpecRecord | None = Relationship(back_populates="parameters")
+    parent: Optional["PopulationSpecParameterRecord"] = Relationship(
+        back_populates="children",
+        sa_relationship_kwargs={"remote_side": "PopulationSpecParameterRecord.id"},
+    )
+    children: list["PopulationSpecParameterRecord"] = Relationship(back_populates="parent")
+
+
+class PopulationWorkspaceNoteRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    text: str
+    scope: str = "workspace"
+    object_external_id: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="notes")
+    tags: list["PopulationWorkspaceNoteTagRecord"] = Relationship(back_populates="note")
+
+
+class PopulationWorkspaceNoteTagRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("note_id", "tag", name="uq_population_note_tag"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    note_id: int = Field(foreign_key="populationworkspacenoterecord.id", index=True)
+    tag: str
+
+    note: PopulationWorkspaceNoteRecord | None = Relationship(back_populates="tags")
+
+
+class PopulationWorkspaceAuditEventRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    event_type: str
+    message: str
+    object_external_id: str | None = None
+    metadata_json: str = "{}"
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="audit_events")
+
+
+class PopulationMatchRunRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    workspace_id: int = Field(foreign_key="populationmatchingworkspacerecord.id", index=True)
+    source_study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    target_study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    method: PopulationMatchingMethod = PopulationMatchingMethod.weighted_knn
+    k: int
+    source_people_evaluated: int = 0
+    target_people_available: int = 0
+    approved_mappings_used: int = 0
+    match_count: int = 0
+    average_distance: float | None = None
+    summary_json: str = "{}"
+
+    workspace: PopulationMatchingWorkspaceRecord | None = Relationship(back_populates="runs")
+    matches: list["PopulationPersonMatchRecord"] = Relationship(back_populates="run")
+
+
+class PopulationPersonMatchRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="populationmatchrunrecord.id", index=True)
+    source_person_id: int = Field(foreign_key="populationpersonrecord.id", index=True)
+    target_person_id: int = Field(foreign_key="populationpersonrecord.id", index=True)
+    distance: float
+    similarity: float
+    matched_features_count: int = 0
+    missing_features_count: int = 0
+    rank: int = 0
+
+    run: PopulationMatchRunRecord | None = Relationship(back_populates="matches")
+    feature_distances: list["PopulationFeatureDistanceRecord"] = Relationship(back_populates="match")
+
+
+class PopulationFeatureDistanceRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    person_match_id: int = Field(foreign_key="populationpersonmatchrecord.id", index=True)
+    mapping_id: int | None = Field(default=None, foreign_key="populationvariablesetmappingrecord.id", index=True)
+    mapping_external_id: str
+    mapping_name: str
+    distance: float | None = None
+    weight: float
+    source_value_json: str = "null"
+    target_value_json: str = "null"
+    missing: bool = False
+
+    match: PopulationPersonMatchRecord | None = Relationship(back_populates="feature_distances")
+    mapping: PopulationVariableSetMappingRecord | None = Relationship()
+
+
 # Domain aliases using requested terminology.
 RuleRecord = AdapterRecord
 PredicateGroupRecord = ConditionChainRecord
