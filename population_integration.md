@@ -220,7 +220,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `b1e4359` `Add population browse and import pages`.
 7. Add matching repositories and services.
    - Move transform, comparator, distance, matching, estimation, and validation logic into DB-backed matching services.
-   - Commit: pending.
+   - Commit: `9dcc477` `Add DB-backed population matching services`.
 8. Add workspace and mapping pages.
    - Port workspace/config selection and variable-set mapping management pages.
    - Commit: pending.
