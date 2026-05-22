@@ -36,6 +36,7 @@ def _render_header(title: str) -> None:
             ui.link('Variables', '/variables')
             ui.link('Contexts', '/contexts')
             ui.link('Datasets', '/datasets')
+            ui.link('Population', '/population/studies')
 
 
 def _render_breadcrumbs(path: str, breadcrumb_items: Optional[list[tuple[str, str | None]]] = None) -> None:
