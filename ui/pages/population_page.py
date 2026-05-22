@@ -6,11 +6,20 @@ from pathlib import Path
 
 from nicegui import ui
 from nicegui.events import UploadEventArguments
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from models import PopulationComparatorKind, PopulationComparableValueKind, PopulationTransformKind
+from models import (
+    PopulationComparatorKind,
+    PopulationComparableValueKind,
+    PopulationFeatureDistanceRecord,
+    PopulationMatchRunRecord,
+    PopulationPersonMatchRecord,
+    PopulationPersonRecord,
+    PopulationQuestionRecord,
+    PopulationTransformKind,
+)
 from repositories import population_matching_repo, population_repo
-from services import population_import_service
+from services import population_import_service, population_matching_service
 from ui.components.page_shell import page_shell
 
 
@@ -93,6 +102,31 @@ def register_population_pages(engine) -> None:
                 ui.label('Population workspace not found.')
                 return
             _render_workspace_mappings(engine, workspace_id)
+
+    @ui.page('/population/workspaces/{workspace_id}/matching')
+    def population_workspace_matching(workspace_id: int) -> None:
+        with page_shell(title='Population Matching', breadcrumb_path=f'/population/workspaces/{workspace_id}/matching', max_width_class='max-w-6xl'):
+            _render_matching(engine, workspace_id)
+
+    @ui.page('/population/workspaces/{workspace_id}/runs/{run_id}')
+    def population_run_detail(workspace_id: int, run_id: int) -> None:
+        with page_shell(title='Population Match Run', breadcrumb_path=f'/population/workspaces/{workspace_id}/runs/{run_id}', max_width_class='max-w-6xl'):
+            _render_run_detail(engine, workspace_id, run_id)
+
+    @ui.page('/population/workspaces/{workspace_id}/individual-match')
+    def population_individual_matching(workspace_id: int) -> None:
+        with page_shell(title='Individual Population Match', breadcrumb_path=f'/population/workspaces/{workspace_id}/individual-match', max_width_class='max-w-6xl'):
+            _render_individual_matching(engine, workspace_id)
+
+    @ui.page('/population/workspaces/{workspace_id}/estimate')
+    def population_estimate(workspace_id: int) -> None:
+        with page_shell(title='Population Estimate', breadcrumb_path=f'/population/workspaces/{workspace_id}/estimate', max_width_class='max-w-6xl'):
+            _render_estimate_and_validation(engine, workspace_id)
+
+    @ui.page('/population/workspaces/{workspace_id}/notes')
+    def population_notes(workspace_id: int) -> None:
+        with page_shell(title='Population Notes', breadcrumb_path=f'/population/workspaces/{workspace_id}/notes', max_width_class='max-w-5xl'):
+            _render_workspace_notes(engine, workspace_id)
 
 
 def _render_population_studies(engine) -> None:
@@ -453,6 +487,301 @@ def _render_mapping_form(engine, workspace_id: int, left_id: int, right_id: int,
     ui.button('Save mapping', on_click=create_mapping, color='primary').props('outline')
 
 
+def _render_matching(engine, workspace_id: int) -> None:
+    workspace, defaults, study_names = _workspace_context(engine, workspace_id)
+    if workspace is None or defaults is None or defaults.source_study_id is None or defaults.target_study_id is None:
+        ui.label('Workspace needs source and target matching defaults.')
+        return
+    _render_workspace_links(workspace_id, workspace.name)
+    ui.label('Batch weighted k-NN').classes('text-h5')
+    source_options = _workspace_study_options(engine, workspace_id)
+    source_select = ui.select(source_options, value=defaults.source_study_id, label='Source study').classes('w-full')
+    target_select = ui.select(source_options, value=defaults.target_study_id, label='Target study').classes('w-full')
+    k_input = ui.number('k nearest neighbors', value=defaults.k, min=1, max=50).classes('w-full')
+    limit_input = ui.number('Source-person limit', value=25, min=1).classes('w-full')
+    status = ui.label('Batch runs persist full match details.').classes('text-body2 text-grey-7')
+
+    def run_matching() -> None:
+        source_id = int(source_select.value) if source_select.value is not None else None
+        target_id = int(target_select.value) if target_select.value is not None else None
+        if source_id is None or target_id is None or source_id == target_id:
+            ui.notify('Choose two different source and target studies.', color='negative')
+            return
+        try:
+            with Session(engine) as session:
+                population_matching_repo.update_matching_defaults(
+                    session,
+                    workspace_id,
+                    source_study_id=source_id,
+                    target_study_id=target_id,
+                    k=int(k_input.value or 1),
+                )
+                result = population_matching_service.run_weighted_knn(
+                    session,
+                    workspace_id=workspace_id,
+                    source_limit=int(limit_input.value or 25),
+                )
+        except Exception as exc:
+            status.set_text(f'Matching failed: {exc}')
+            return
+        ui.navigate.to(f'/population/workspaces/{workspace_id}/runs/{int(result.run.id)}')
+
+    ui.button('Run matching', on_click=run_matching, color='primary').props('outline')
+    ui.separator()
+    ui.label('Saved runs').classes('text-h6')
+    with Session(engine) as session:
+        runs = list(
+            session.exec(
+                select(PopulationMatchRunRecord)
+                .where(PopulationMatchRunRecord.workspace_id == workspace_id)
+                .order_by(PopulationMatchRunRecord.created_at.desc(), PopulationMatchRunRecord.id.desc())
+            )
+        )
+    if not runs:
+        ui.label('No batch runs saved yet.')
+        return
+    for run in runs:
+        source_name = study_names.get(run.source_study_id, f'#{run.source_study_id}')
+        target_name = study_names.get(run.target_study_id, f'#{run.target_study_id}')
+        with ui.row().classes('w-full items-center justify-between border rounded p-2'):
+            with ui.column().classes('gap-0'):
+                ui.label(run.external_id)
+                ui.label(f'{source_name} -> {target_name} | k={run.k} | matches={run.match_count}').classes('text-caption text-grey-7')
+            ui.button('Open', on_click=lambda rid=run.id: ui.navigate.to(f'/population/workspaces/{workspace_id}/runs/{int(rid)}')).props('flat')
+
+
+def _render_run_detail(engine, workspace_id: int, run_id: int) -> None:
+    with Session(engine) as session:
+        run = session.get(PopulationMatchRunRecord, run_id)
+        workspace = population_matching_repo.get_workspace(session, workspace_id)
+        match_rows = list(
+            session.exec(
+                select(PopulationPersonMatchRecord)
+                .where(PopulationPersonMatchRecord.run_id == run_id)
+                .order_by(PopulationPersonMatchRecord.source_person_id, PopulationPersonMatchRecord.rank)
+            )
+        )
+        people = {
+            int(person.id): person.external_id
+            for person in session.exec(select(PopulationPersonRecord))
+            if person.id is not None
+        }
+        feature_rows = {
+            int(match.id): list(
+                session.exec(
+                    select(PopulationFeatureDistanceRecord)
+                    .where(PopulationFeatureDistanceRecord.person_match_id == match.id)
+                    .order_by(PopulationFeatureDistanceRecord.id)
+                )
+            )
+            for match in match_rows
+            if match.id is not None
+        }
+    if run is None or workspace is None or run.workspace_id != workspace_id:
+        ui.label('Match run not found for this workspace.')
+        return
+    _render_workspace_links(workspace_id, workspace.name)
+    ui.label(run.external_id).classes('text-h5')
+    ui.label(
+        f'{run.match_count} matches | {run.source_people_evaluated} source people | '
+        f'average distance={run.average_distance if run.average_distance is not None else "-"}'
+    ).classes('text-body2 text-grey-7')
+    for match in match_rows:
+        with ui.expansion(
+            f'{people.get(match.source_person_id, match.source_person_id)} -> '
+            f'{people.get(match.target_person_id, match.target_person_id)} | distance={match.distance:.3f}',
+        ).classes('w-full border rounded'):
+            ui.label(f'rank={match.rank} similarity={match.similarity:.3f} missing features={match.missing_features_count}').classes('text-body2')
+            for feature in feature_rows.get(int(match.id), []):
+                ui.label(
+                    f'{feature.mapping_name}: distance={feature.distance if feature.distance is not None else "-"} '
+                    f'weight={feature.weight} missing={feature.missing}'
+                ).classes('text-body2')
+
+
+def _render_individual_matching(engine, workspace_id: int) -> None:
+    workspace, defaults, _ = _workspace_context(engine, workspace_id)
+    if workspace is None or defaults is None or defaults.source_study_id is None or defaults.target_study_id is None:
+        ui.label('Workspace needs matching defaults.')
+        return
+    _render_workspace_links(workspace_id, workspace.name)
+    ui.label('Live individual match').classes('text-h5')
+    person_options = _person_options(engine, defaults.source_study_id)
+    person_select = ui.select(person_options, label='Source person').classes('w-full')
+    k_input = ui.number('k nearest neighbors', value=defaults.k, min=1, max=50).classes('w-full')
+    results = ui.column().classes('w-full gap-2')
+
+    def find_matches() -> None:
+        results.clear()
+        if person_select.value is None:
+            ui.notify('Choose a source person.', color='negative')
+            return
+        try:
+            with Session(engine) as session:
+                matches = population_matching_service.find_nearest_matches(
+                    session,
+                    workspace_id=workspace_id,
+                    source_person_id=int(person_select.value),
+                    source_study_id=defaults.source_study_id,
+                    target_study_id=defaults.target_study_id,
+                    k=int(k_input.value or 1),
+                )
+        except Exception as exc:
+            ui.notify(f'Live matching failed: {exc}', color='negative')
+            return
+        with results:
+            ui.label(f'{len(matches)} live matches').classes('text-subtitle2')
+            _render_live_matches(matches)
+
+    ui.button('Find matches', on_click=find_matches, color='primary').props('outline')
+
+
+def _render_estimate_and_validation(engine, workspace_id: int) -> None:
+    workspace, defaults, _ = _workspace_context(engine, workspace_id)
+    if workspace is None or defaults is None or defaults.source_study_id is None or defaults.target_study_id is None:
+        ui.label('Workspace needs matching defaults.')
+        return
+    _render_workspace_links(workspace_id, workspace.name)
+    ui.label('Live estimate').classes('text-h5')
+    person_select = ui.select(_person_options(engine, defaults.source_study_id), label='Source person').classes('w-full')
+    question_select = ui.select(_study_question_options(engine, defaults.target_study_id), label='Target question').classes('w-full')
+    k_input = ui.number('k nearest neighbors', value=defaults.k, min=1, max=50).classes('w-full')
+    estimate_results = ui.column().classes('w-full gap-2')
+
+    def estimate() -> None:
+        estimate_results.clear()
+        if person_select.value is None or question_select.value is None:
+            ui.notify('Choose a source person and target question.', color='negative')
+            return
+        try:
+            with Session(engine) as session:
+                matches = population_matching_service.find_nearest_matches(
+                    session,
+                    workspace_id=workspace_id,
+                    source_person_id=int(person_select.value),
+                    source_study_id=defaults.source_study_id,
+                    target_study_id=defaults.target_study_id,
+                    k=int(k_input.value or 1),
+                )
+                result = population_matching_service.estimate_from_neighbors(
+                    session,
+                    matches=matches,
+                    target_question_id=int(question_select.value),
+                )
+        except Exception as exc:
+            ui.notify(f'Estimation failed: {exc}', color='negative')
+            return
+        with estimate_results:
+            ui.label(f'Estimate: {_display_value(result.get("estimate"))}').classes('text-subtitle2')
+            ui.label(f'Method: {result.get("method")}').classes('text-body2 text-grey-7')
+            _render_live_matches(matches)
+
+    ui.button('Estimate from neighbors', on_click=estimate, color='primary').props('outline')
+    ui.separator()
+    _render_validation(engine, workspace_id, defaults.source_study_id, defaults.target_study_id, defaults.k)
+
+
+def _render_validation(engine, workspace_id: int, source_study_id: int, target_study_id: int, default_k: int) -> None:
+    with Session(engine) as session:
+        one_to_one = {
+            mapping.id: mapping.name
+            for mapping in population_matching_service.active_mappings(session, workspace_id)
+            if len(mapping.left_inputs) == 1 and len(mapping.right_inputs) == 1
+        }
+    ui.label('Holdout validation').classes('text-h5')
+    mapping_select = ui.select(one_to_one, label='One-to-one mapping').classes('w-full')
+    person_select = ui.select(_person_options(engine, source_study_id), label='Person (for person validation)').classes('w-full')
+    k_input = ui.number('Validation k', value=default_k, min=1, max=50).classes('w-full')
+    results = ui.column().classes('w-full gap-2')
+
+    def validate_person() -> None:
+        results.clear()
+        if mapping_select.value is None or person_select.value is None:
+            ui.notify('Choose a mapping and person.', color='negative')
+            return
+        with Session(engine) as session:
+            result = population_matching_service.validate_mapping_for_person(
+                session,
+                workspace_id=workspace_id,
+                source_person_id=int(person_select.value),
+                source_study_id=source_study_id,
+                target_study_id=target_study_id,
+                mapping_id=int(mapping_select.value),
+                k=int(k_input.value or 1),
+            )
+        with results:
+            if result is None:
+                ui.label('No validation case for that person.')
+                return
+            ui.label(f'Comparison: {result["comparison"]}').classes('text-body2')
+            _render_live_matches(result['matches'])
+
+    def validate_population() -> None:
+        results.clear()
+        if mapping_select.value is None:
+            ui.notify('Choose a mapping.', color='negative')
+            return
+        with Session(engine) as session:
+            result = population_matching_service.validate_mapping_population(
+                session,
+                workspace_id=workspace_id,
+                source_study_id=source_study_id,
+                target_study_id=target_study_id,
+                mapping_id=int(mapping_select.value),
+                k=int(k_input.value or 1),
+            )
+        with results:
+            ui.label(f'Summary: {result["summary"]}').classes('text-body2')
+
+    with ui.row().classes('gap-2'):
+        ui.button('Validate person', on_click=validate_person).props('outline')
+        ui.button('Validate population', on_click=validate_population).props('outline')
+
+
+def _render_workspace_notes(engine, workspace_id: int) -> None:
+    workspace, _, _ = _workspace_context(engine, workspace_id)
+    if workspace is None:
+        ui.label('Workspace not found.')
+        return
+    _render_workspace_links(workspace_id, workspace.name)
+    ui.label('Workspace notes').classes('text-h5')
+    note_input = ui.textarea('Note').classes('w-full')
+    tag_input = ui.input('Tags, comma separated').classes('w-full')
+    notes_container = ui.column().classes('w-full gap-2')
+
+    def render_notes() -> None:
+        notes_container.clear()
+        with Session(engine) as session:
+            notes = population_matching_repo.list_notes(session, workspace_id)
+            tags = {int(note.id): population_matching_repo.list_note_tags(session, int(note.id)) for note in notes if note.id is not None}
+        with notes_container:
+            if not notes:
+                ui.label('No notes yet.')
+            for note in notes:
+                with ui.column().classes('w-full gap-1 border rounded p-2'):
+                    ui.label(note.text).classes('break-words')
+                    ui.label(', '.join(tags.get(int(note.id), [])) or 'no tags').classes('text-caption text-grey-7')
+
+    def add_note() -> None:
+        text = str(note_input.value or '').strip()
+        if not text:
+            ui.notify('Write a note first.', color='negative')
+            return
+        with Session(engine) as session:
+            population_matching_repo.add_note(
+                session,
+                workspace_id,
+                text,
+                tags=[tag.strip() for tag in str(tag_input.value or '').split(',')],
+            )
+        note_input.value = ''
+        tag_input.value = ''
+        render_notes()
+
+    ui.button('Add note', on_click=add_note, color='primary').props('outline')
+    render_notes()
+
+
 def _source_label(source_file: str, source_sheet: str | None) -> str:
     return f'{source_file} | {source_sheet}' if source_sheet else source_file
 
@@ -502,3 +831,102 @@ def _disable_mapping_and_refresh(engine, mapping_id: int, refresh) -> None:
         population_matching_repo.disable_mapping(session, mapping_id)
     ui.notify('Mapping disabled.', color='positive')
     refresh()
+
+
+def _workspace_context(engine, workspace_id: int):
+    with Session(engine) as session:
+        workspace = population_matching_repo.get_workspace(session, workspace_id)
+        defaults = population_matching_repo.get_matching_defaults(session, workspace_id)
+        studies = {int(study.id): study.name for study in population_repo.list_studies(session) if study.id is not None}
+    return workspace, defaults, studies
+
+
+def _workspace_study_options(engine, workspace_id: int) -> dict[int, str]:
+    with Session(engine) as session:
+        study_ids = [link.study_id for link in population_matching_repo.list_workspace_studies(session, workspace_id)]
+        studies = {int(study.id): study.name for study in population_repo.list_studies(session) if study.id is not None}
+    return {study_id: studies.get(study_id, f'#{study_id}') for study_id in study_ids}
+
+
+def _render_workspace_links(workspace_id: int, workspace_name: str) -> None:
+    ui.label(workspace_name).classes('text-h5')
+    with ui.row().classes('gap-2'):
+        ui.link('Workspaces', '/population/workspaces')
+        ui.link('Mappings', f'/population/workspaces/{workspace_id}/mappings')
+        ui.link('Batch matching', f'/population/workspaces/{workspace_id}/matching')
+        ui.link('Individual match', f'/population/workspaces/{workspace_id}/individual-match')
+        ui.link('Estimate / validate', f'/population/workspaces/{workspace_id}/estimate')
+        ui.link('Notes', f'/population/workspaces/{workspace_id}/notes')
+    ui.separator()
+
+
+def _person_options(engine, study_id: int, limit: int = 500) -> dict[int, str]:
+    with Session(engine) as session:
+        people = list(
+            session.exec(
+                select(PopulationPersonRecord)
+                .where(PopulationPersonRecord.study_id == study_id)
+                .order_by(PopulationPersonRecord.id)
+                .limit(limit)
+            )
+        )
+    return {int(person.id): _person_label(person) for person in people if person.id is not None}
+
+
+def _study_question_options(engine, study_id: int, limit: int = 500) -> dict[int, str]:
+    with Session(engine) as session:
+        questions = list(
+            session.exec(
+                select(PopulationQuestionRecord)
+                .where(PopulationQuestionRecord.study_id == study_id)
+                .order_by(PopulationQuestionRecord.wording, PopulationQuestionRecord.id)
+                .limit(limit)
+            )
+        )
+    return {int(question.id): _question_label(question) for question in questions if question.id is not None}
+
+
+def _person_label(person: PopulationPersonRecord) -> str:
+    if person.source_person_id and person.source_person_id != person.external_id:
+        return f'{person.source_person_id} ({person.external_id})'
+    return person.external_id
+
+
+def _question_label(question: PopulationQuestionRecord) -> str:
+    name = question.short_name or question.wording
+    return f'{_truncate(name, 120)} [{question.kind.value}]'
+
+
+def _truncate(value: str, length: int) -> str:
+    text = str(value)
+    return text if len(text) <= length else f'{text[: length - 1]}...'
+
+
+def _display_value(value) -> str:
+    if isinstance(value, float):
+        return f'{value:.3f}'
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return '-' if value is None else str(value)
+
+
+def _render_live_matches(matches) -> None:
+    if not matches:
+        ui.label('No matches found.')
+        return
+    for match in matches:
+        with ui.expansion(
+            f'{match.source_person_external_id} -> {match.target_person_external_id} | '
+            f'distance={match.distance:.3f} similarity={match.similarity:.3f}'
+        ).classes('w-full border rounded'):
+            ui.label(
+                f'matched features={match.matched_features_count} | missing features={match.missing_features_count}'
+            ).classes('text-body2 text-grey-7')
+            for feature in match.feature_distances:
+                source_value = _display_value(feature.source_value)
+                target_value = _display_value(feature.target_value)
+                distance = '-' if feature.distance is None else f'{feature.distance:.3f}'
+                ui.label(
+                    f'{feature.mapping_name}: {source_value} -> {target_value}; distance={distance}; '
+                    f'weight={feature.weight}; missing={feature.missing}'
+                ).classes('text-body2 break-words')
