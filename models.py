@@ -5,7 +5,7 @@ import math
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 from pydantic import ConfigDict
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, LargeBinary, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel, Session, create_engine, select
 
 
@@ -615,6 +615,190 @@ class DatapointValueRecord(SQLModel, table=True):
 
     datapoint: DatapointRecord | None = Relationship(back_populates="values")
     field: DatasetFieldRecord | None = Relationship(back_populates="datapoint_values")
+
+
+class PopulationDataKind(str, Enum):
+    numeric = "numeric"
+    ordinal = "ordinal"
+    likert = "likert"
+    semantic_differential = "semantic_differential"
+    categorical = "categorical"
+    binary = "binary"
+    multi_select = "multi_select"
+    text = "text"
+    derived = "derived"
+    experimental_condition = "experimental_condition"
+    attention_or_quality = "attention_or_quality"
+    demographic = "demographic"
+    unknown = "unknown"
+
+
+class PopulationQuestionRole(str, Enum):
+    demographic = "demographic"
+    belief = "belief"
+    behavior = "behavior"
+    preference = "preference"
+    outcome = "outcome"
+    experimental_condition = "experimental_condition"
+    quality_control = "quality_control"
+    derived = "derived"
+    metadata = "metadata"
+    unknown = "unknown"
+
+
+class PopulationValueKind(str, Enum):
+    number = "number"
+    integer = "integer"
+    string = "string"
+    boolean = "boolean"
+    date = "date"
+    datetime = "datetime"
+    category = "category"
+    list = "list"
+    missing = "missing"
+
+
+class PopulationArtifactRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    filename: str
+    media_type: str
+    fingerprint: str = Field(index=True)
+    byte_size: int
+    content: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    metadata_json: str = "{}"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    studies: list["PopulationStudyRecord"] = Relationship(back_populates="source_artifact")
+
+
+class PopulationSourceRefRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    file_path: str
+    sheet_name: str | None = None
+    row_index: int | None = None
+    column_index: int | None = None
+    column_name: str | None = None
+
+
+class PopulationStudyRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    name: str
+    source_file: str
+    source_sheet: str | None = None
+    description: str | None = None
+    collected_at: str | None = None
+    metadata_json: str = "{}"
+    source_artifact_id: int | None = Field(default=None, foreign_key="populationartifactrecord.id", index=True)
+
+    source_artifact: PopulationArtifactRecord | None = Relationship(back_populates="studies")
+    questions: list["PopulationQuestionRecord"] = Relationship(back_populates="study")
+    people: list["PopulationPersonRecord"] = Relationship(back_populates="study")
+
+
+class PopulationQuestionScaleRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    min_value: float | None = None
+    max_value: float | None = None
+    min_label: str | None = None
+    max_label: str | None = None
+    step: float | None = None
+    raw_description: str | None = None
+
+    question: Optional["PopulationQuestionRecord"] = Relationship(back_populates="scale")
+    options: list["PopulationQuestionOptionRecord"] = Relationship(back_populates="scale")
+
+
+class PopulationQuestionRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    source_ref_id: int = Field(foreign_key="populationsourcerefrecord.id", index=True)
+    scale_id: int | None = Field(default=None, foreign_key="populationquestionscalerecord.id", index=True)
+
+    kind: PopulationDataKind = PopulationDataKind.unknown
+    wording: str
+    short_name: str | None = None
+    role: PopulationQuestionRole = PopulationQuestionRole.unknown
+    constructs_json: str = "[]"
+    missing_codes_json: str = "[]"
+    reverse_scored: bool = False
+    harmonized_variable_id: str | None = None
+    metadata_json: str = "{}"
+
+    study: PopulationStudyRecord | None = Relationship(back_populates="questions")
+    source_ref: PopulationSourceRefRecord | None = Relationship()
+    scale: PopulationQuestionScaleRecord | None = Relationship(back_populates="question")
+    responses: list["PopulationResponseRecord"] = Relationship(back_populates="question")
+
+
+class PopulationQuestionOptionRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    scale_id: int = Field(foreign_key="populationquestionscalerecord.id", index=True)
+    value_json: str
+    label: str | None = None
+    order_index: int | None = None
+    is_missing: bool = False
+
+    scale: PopulationQuestionScaleRecord | None = Relationship(back_populates="options")
+
+
+class PopulationPersonRecord(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, sa_column_kwargs={"unique": True})
+    study_id: int = Field(foreign_key="populationstudyrecord.id", index=True)
+    source_ref_id: int = Field(foreign_key="populationsourcerefrecord.id", index=True)
+    source_person_id: str | None = None
+    metadata_json: str = "{}"
+
+    study: PopulationStudyRecord | None = Relationship(back_populates="people")
+    source_ref: PopulationSourceRefRecord | None = Relationship()
+    responses: list["PopulationResponseRecord"] = Relationship(back_populates="person")
+    attributes: list["PopulationPersonAttributeRecord"] = Relationship(back_populates="person")
+    weights: list["PopulationPersonWeightRecord"] = Relationship(back_populates="person")
+
+
+class PopulationValueColumns(SQLModel):
+    value_kind: PopulationValueKind = PopulationValueKind.missing
+    raw_json: str = "null"
+    normalized_json: str = "null"
+    label: str | None = None
+    is_missing: bool = False
+
+
+class PopulationResponseRecord(PopulationValueColumns, table=True):
+    __table_args__ = (UniqueConstraint("person_id", "question_id", name="uq_population_person_question"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    person_id: int = Field(foreign_key="populationpersonrecord.id", index=True)
+    question_id: int = Field(foreign_key="populationquestionrecord.id", index=True)
+    source_ref_id: int = Field(foreign_key="populationsourcerefrecord.id", index=True)
+    metadata_json: str = "{}"
+
+    person: PopulationPersonRecord | None = Relationship(back_populates="responses")
+    question: PopulationQuestionRecord | None = Relationship(back_populates="responses")
+    source_ref: PopulationSourceRefRecord | None = Relationship()
+
+
+class PopulationPersonAttributeRecord(PopulationValueColumns, table=True):
+    __table_args__ = (UniqueConstraint("person_id", "name", name="uq_population_person_attribute"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    person_id: int = Field(foreign_key="populationpersonrecord.id", index=True)
+    name: str
+
+    person: PopulationPersonRecord | None = Relationship(back_populates="attributes")
+
+
+class PopulationPersonWeightRecord(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("person_id", "name", name="uq_population_person_weight"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    person_id: int = Field(foreign_key="populationpersonrecord.id", index=True)
+    name: str
+    value: float
+
+    person: PopulationPersonRecord | None = Relationship(back_populates="weights")
 
 
 # Domain aliases using requested terminology.
