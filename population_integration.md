@@ -211,7 +211,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `b423bea` `Add population data repositories`.
 4. Add DB-backed XLSX import service.
    - Refactor prototype ingestion behavior into services that normalize uploaded `.xlsx` workbooks and question catalogs into DB rows and store source artifacts in DB.
-   - Commit: pending.
+   - Commit: `accb050` `Add population workbook import services`.
 5. Add one-time prototype migration importer.
    - Import current population JSON, config JSON, run JSON, and available raw source files into DB while preserving prototype external IDs and rerun safety.
    - Commit: pending.
