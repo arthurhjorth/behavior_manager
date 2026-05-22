@@ -19,6 +19,8 @@ This project tries to provide [meaningful building blocks](docs/core_mechanics.m
 ```
 git@github.com:arthurhjorth/behavior_manager.git
 cd behavior_manager
+python -m venv .venv ## this will depend on whether you have an alias for python. otherwise use python3.12, or whatever.
+. .venv/bin/activate
 pip install -r requirements.txt
 python server.py
 ```
