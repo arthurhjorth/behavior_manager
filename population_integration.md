@@ -208,7 +208,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `4850da9` `Add population matching ORM models`.
 3. Add population repositories.
    - Add DB query/write helpers for population artifacts, studies, questions, people, and responses.
-   - Commit: pending.
+   - Commit: `b423bea` `Add population data repositories`.
 4. Add DB-backed XLSX import service.
    - Refactor prototype ingestion behavior into services that normalize uploaded `.xlsx` workbooks and question catalogs into DB rows and store source artifacts in DB.
    - Commit: pending.
