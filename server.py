@@ -27,8 +27,8 @@ from models import (
     list_studies,
     replace_nl_model_adapters,
 )
-from repositories import decision_repo, variable_repo
-from services import decision_service, netlogo_export_service, variable_service
+from repositories import decision_repo, population_repo, variable_repo
+from services import decision_service, netlogo_export_service, netlogo_population_service, variable_service
 from ui.components.confirm_actions import confirm_delete_button
 from ui.components.page_shell import page_shell
 from ui.pages.contexts_page import register_context_pages
@@ -398,7 +398,141 @@ def netlogo_models_page() -> None:
             render_results(Path(event.file.name).name, procedures)
 
         ui.upload(on_upload=handle_upload, auto_upload=True).props('accept=.nlogo,.nlogox,.txt,.nl,.netlogo')
+        ui.link('Create population package', '/netlogo/population-package')
         render_model_list()
+
+
+@ui.page('/netlogo/population-package')
+def netlogo_population_package_page() -> None:
+    with page_shell(
+        title='NetLogo Population Package',
+        breadcrumb_path='/netlogo/population-package',
+        max_width_class='max-w-5xl',
+    ):
+        status = ui.label(
+            'Choose a NetLogo model, a population study, fields, and an agent type. Then download a zip package.'
+        ).classes('text-body2')
+
+        with Session(ENGINE) as session:
+            models = list_netlogo_models(session)
+            studies = population_repo.list_studies(session)
+
+        model_options = {int(model.id): model.model_name for model in models if model.id is not None}
+        study_options = {int(study.id): study.name for study in studies if study.id is not None}
+
+        selected_model = ui.select(model_options, label='NetLogo model').classes('w-full')
+        selected_study = ui.select(study_options, label='Population dataset').classes('w-full')
+        agent_select = ui.select({}, label='Breed or turtles').classes('w-full')
+        field_select = ui.select({}, label='Population fields', multiple=True).classes('w-full')
+
+        preview_container = ui.column().classes('w-full gap-1')
+
+        def load_model_text(model_id: int | None) -> tuple[str, str] | None:
+            if model_id is None:
+                return None
+            model_record = next((model for model in models if model.id == model_id), None)
+            if model_record is None:
+                return None
+            model_path = MODELS_DIR / model_record.model_name
+            if not model_path.exists():
+                raise ValueError(f'Model file not found: {model_record.model_name}')
+            return model_record.model_name, model_path.read_text(encoding='utf-8')
+
+        def set_select_options(control, options: dict, value=None) -> None:
+            control.options = options
+            control.value = value
+            control.update()
+
+        def refresh_agents() -> None:
+            model_id = int(selected_model.value) if selected_model.value is not None else None
+            try:
+                loaded = load_model_text(model_id)
+                options = netlogo_population_service.breed_options(loaded[1]) if loaded else {}
+            except Exception as exc:
+                status.set_text(f'Could not inspect model breeds: {exc}')
+                options = {}
+            set_select_options(agent_select, options, 'turtles' if 'turtles' in options else None)
+
+        def refresh_fields() -> None:
+            study_id = int(selected_study.value) if selected_study.value is not None else None
+            if study_id is None:
+                set_select_options(field_select, {})
+                return
+            with Session(ENGINE) as session:
+                questions = population_repo.list_questions(session, study_id=study_id, limit=2000)
+            options = {
+                int(question.id): f'{question.short_name or question.wording} [{question.kind.value}]'
+                for question in questions
+                if question.id is not None
+            }
+            set_select_options(field_select, options)
+
+        def render_preview() -> None:
+            preview_container.clear()
+            question_ids = [int(value) for value in (field_select.value or [])]
+            if not question_ids:
+                return
+            with Session(ENGINE) as session:
+                questions = {
+                    int(question.id): question
+                    for question in population_repo.list_questions(session)
+                    if question.id in question_ids and question.id is not None
+                }
+            used: set[str] = set()
+            with preview_container:
+                ui.label('Field name preview').classes('text-subtitle2')
+                for question_id in question_ids:
+                    question = questions.get(question_id)
+                    if question is None:
+                        continue
+                    source_name = question.short_name or question.wording
+                    base = netlogo_population_service.safe_netlogo_name(source_name)
+                    name = base
+                    suffix = 2
+                    while name in used:
+                        name = f'{base}-{suffix}'
+                        suffix += 1
+                    used.add(name)
+                    ui.label(f'{source_name} -> {name}').classes('text-body2 break-words')
+
+        def generate_package() -> None:
+            model_id = int(selected_model.value) if selected_model.value is not None else None
+            study_id = int(selected_study.value) if selected_study.value is not None else None
+            question_ids = [int(value) for value in (field_select.value or [])]
+            agent_kind = str(agent_select.value or '').strip()
+            if model_id is None or study_id is None or not question_ids or not agent_kind:
+                status.set_text('Choose model, population dataset, fields, and agent type.')
+                return
+            try:
+                loaded = load_model_text(model_id)
+                if loaded is None:
+                    raise ValueError('Model not found.')
+                model_filename, model_text = loaded
+                with Session(ENGINE) as session:
+                    package = netlogo_population_service.build_population_package(
+                        session,
+                        model_text=model_text,
+                        model_filename=model_filename,
+                        study_id=study_id,
+                        question_ids=question_ids,
+                        agent_kind=agent_kind,
+                    )
+            except Exception as exc:
+                status.set_text(f'Package generation failed: {exc}')
+                return
+            ui.download(package.content, filename=package.filename, media_type='application/zip')
+            status.set_text(f'Generated {package.filename} with {package.row_count} population rows.')
+
+        selected_model.on('update:model-value', lambda _: refresh_agents())
+        selected_study.on('update:model-value', lambda _: refresh_fields())
+        field_select.on('update:model-value', lambda _: render_preview())
+
+        with ui.row().classes('w-full items-center gap-2'):
+            ui.button('Generate package', on_click=generate_package, color='primary').props('outline')
+            ui.link('Back to NetLogo models', '/netlogo/models')
+
+        refresh_agents()
+        refresh_fields()
 
 
 @ui.page('/netlogo/adapters')

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import zipfile
 import unittest
 
 from openpyxl import Workbook
@@ -19,7 +20,7 @@ from models import (
     PopulationTransformKind,
 )
 from repositories import population_matching_repo, population_repo
-from services import population_import_service, population_matching_service
+from services import netlogo_population_service, population_import_service, population_matching_service
 
 
 def make_engine():
@@ -196,6 +197,54 @@ class PopulationIntegrationTests(unittest.TestCase):
             feature_rows = list(session.exec(select(PopulationFeatureDistanceRecord)))
             self.assertEqual(len(feature_rows), 1)
             self.assertEqual(feature_rows[0].mapping_name, "age")
+
+    def test_netlogo_population_package_adds_csv_setup_and_owned_fields(self) -> None:
+        engine = make_engine()
+        model_text = """<?xml version="1.0" encoding="utf-8"?>
+<model>
+  <code><![CDATA[breed [ wolves wolf ]
+wolves-own [ energy ]
+
+to go
+end
+]]></code>
+</model>"""
+        with Session(engine) as session:
+            study = population_repo.create_study(
+                session,
+                external_id="population",
+                name="Population",
+                source_file="fixture.xlsx",
+            )
+            age = add_question(session, int(study.id), "population_age", "Age")
+            meat = add_question(session, int(study.id), "population_meat", "Meat intake")
+            person = add_person(session, int(study.id), "population_p1", "p1")
+            add_response(session, int(person.id), int(age.id), 34)
+            add_response(session, int(person.id), int(meat.id), "low")
+            session.commit()
+
+            package = netlogo_population_service.build_population_package(
+                session,
+                model_text=model_text,
+                model_filename="wolves.nlogox",
+                study_id=int(study.id),
+                question_ids=[int(age.id), int(meat.id)],
+                agent_kind="wolves",
+            )
+
+        with zipfile.ZipFile(BytesIO(package.content)) as archive:
+            names = set(archive.namelist())
+            self.assertEqual(names, {"wolves.nlogox", "population_data.csv", "README.md"})
+            generated_model = archive.read("wolves.nlogox").decode("utf-8")
+            csv_text = archive.read("population_data.csv").decode("utf-8")
+
+        self.assertIn("extensions [csv]", generated_model)
+        self.assertIn("wolves-own [ energy age meat-intake ]", generated_model)
+        self.assertIn("to setup-population-from-dataset", generated_model)
+        self.assertIn("create-wolves 1", generated_model)
+        self.assertIn('csv:from-file "population_data.csv"', generated_model)
+        self.assertIn("age,meat-intake", csv_text)
+        self.assertIn("34,low", csv_text)
 
 
 if __name__ == "__main__":
