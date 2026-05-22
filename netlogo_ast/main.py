@@ -820,20 +820,47 @@ def parse_model_text(model_text: str) -> Program:
 
 
 def declared_variable_names(program: Program) -> Set[str]:
-    return {
-        value.lower()
-        for declaration in program.declarations
-        if declaration.kind.lower() == "globals" or declaration.kind.lower().endswith("-own")
-        for value in declaration.values
-    }
+    return set(declared_variable_contexts(program))
+
+
+def declared_variable_contexts(program: Program) -> Dict[str, Set[str]]:
+    contexts: Dict[str, Set[str]] = {}
+    for declaration in program.declarations:
+        context = _declaration_context(declaration.kind)
+        if context is None:
+            continue
+        for value in declaration.values:
+            contexts.setdefault(value.lower(), set()).add(context)
+    return contexts
 
 
 def model_variable_names(model_text: str) -> Set[str]:
-    return declared_variable_names(parse_model_text(model_text)) | _xml_widget_variable_names(model_text)
+    return set(model_variable_contexts(model_text))
+
+
+def model_variable_contexts(model_text: str) -> Dict[str, Set[str]]:
+    contexts = declared_variable_contexts(parse_model_text(model_text))
+    for variable in _xml_widget_variable_names(model_text):
+        contexts.setdefault(variable, set()).add("observer")
+    return contexts
 
 
 def _is_declaration_keyword(name: str) -> bool:
     return name in {"globals", "breed"} or name.endswith("-own")
+
+
+def _declaration_context(kind: str) -> Optional[str]:
+    lower_kind = kind.lower()
+    if lower_kind == "globals":
+        return "observer"
+    if not lower_kind.endswith("-own"):
+        return None
+    owner = lower_kind.removesuffix("-own")
+    return {
+        "turtles": "turtle",
+        "patches": "patch",
+        "links": "link",
+    }.get(owner, owner)
 
 
 def _xml_widget_variable_names(model_text: str) -> Set[str]:

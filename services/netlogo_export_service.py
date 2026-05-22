@@ -4,7 +4,7 @@ import re
 
 from sqlmodel import Session
 
-from models import AdapterLikelihoodMode, AdapterType, ConditionOperator
+from models import AdapterLikelihoodMode, AdapterType, ConditionOperator, VariableRecord
 from repositories import decision_repo
 
 
@@ -85,8 +85,12 @@ def export_helper_library() -> str:
 
 
 def referenced_variable_names(session: Session, decision_id: int) -> list[str]:
-    variable_name_by_id = _variable_name_by_id(session)
-    names: dict[str, None] = {}
+    return list(referenced_variable_contexts(session, decision_id))
+
+
+def referenced_variable_contexts(session: Session, decision_id: int) -> dict[str, set[str]]:
+    variable_by_id = _variable_by_id(session)
+    contexts: dict[str, set[str]] = {}
 
     for adapter_set in decision_repo.list_adapter_sets(session, decision_id):
         effects = decision_repo.list_adapters(session, adapter_set_id=int(adapter_set.id))
@@ -94,18 +98,21 @@ def referenced_variable_names(session: Session, decision_id: int) -> list[str]:
             continue
         for chain in decision_repo.list_chains(session, int(adapter_set.id)):
             for predicate in decision_repo.list_predicates(session, int(chain.id)):
-                variable_name = variable_name_by_id.get(predicate.variable_id)
-                if variable_name is not None:
-                    names.setdefault(_sanitize_identifier(variable_name), None)
+                variable = variable_by_id.get(predicate.variable_id)
+                if variable is not None:
+                    _add_variable_contexts(contexts, variable)
 
         for effect in effects:
             if effect.adapter_type != AdapterType.linear:
                 continue
             for coefficient in decision_repo.list_coefficients(session, int(effect.id)):
-                variable_name = variable_name_by_id.get(coefficient.variable_id, f'var-{coefficient.variable_id}')
-                names.setdefault(_sanitize_identifier(variable_name), None)
+                variable = variable_by_id.get(coefficient.variable_id)
+                if variable is None:
+                    contexts.setdefault(_sanitize_identifier(f'var-{coefficient.variable_id}'), set())
+                    continue
+                _add_variable_contexts(contexts, variable)
 
-    return list(names)
+    return contexts
 
 
 def _netlogo_helper_library_lines() -> list[str]:
@@ -262,10 +269,37 @@ def _linear_effect_lines(effect, step_index: int, target_literal: str, session: 
 
 def _variable_name_by_id(session: Session) -> dict[int, str]:
     return {
-        int(variable.id): variable.name
+        variable_id: variable.name
+        for variable_id, variable in _variable_by_id(session).items()
+    }
+
+
+def _variable_by_id(session: Session) -> dict[int, VariableRecord]:
+    return {
+        int(variable.id): variable
         for variable in decision_repo.list_variables(session)
         if variable.id is not None
     }
+
+
+def _add_variable_contexts(contexts: dict[str, set[str]], variable: VariableRecord) -> None:
+    name = _sanitize_identifier(variable.name)
+    contexts.setdefault(name, set()).update(_variable_context_names(variable))
+
+
+def _variable_context_names(variable: VariableRecord) -> set[str]:
+    contexts = set()
+    if variable.is_observer:
+        contexts.add('observer')
+    if variable.is_turtle:
+        contexts.add('turtle')
+    if variable.is_patch:
+        contexts.add('patch')
+    if variable.is_link:
+        contexts.add('link')
+    if variable.breed.strip():
+        contexts.add(_sanitize_identifier(variable.breed))
+    return contexts
 
 
 def _predicate_value_literal(predicate) -> str:
