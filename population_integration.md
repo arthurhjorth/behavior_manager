@@ -214,7 +214,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `accb050` `Add population workbook import services`.
 5. Add one-time prototype migration importer.
    - Import current population JSON, config JSON, run JSON, and available raw source files into DB while preserving prototype external IDs and rerun safety.
-   - Commit: pending.
+   - Commit: `56ee702` `Add population prototype migration service`.
 6. Add population browse pages.
    - Register population study, person/response, question, and import pages under existing server navigation.
    - Commit: pending.
