@@ -7,7 +7,7 @@ from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
 from netlogo_ast.main import (
-    model_variable_names,
+    model_variable_contexts,
     parse_model_text,
     replace_procedures_in_model_text,
     summarize_procedures,
@@ -423,9 +423,12 @@ def netlogo_population_package_page() -> None:
         selected_model = ui.select(model_options, label='NetLogo model').classes('w-full')
         selected_study = ui.select(study_options, label='Population dataset').classes('w-full')
         agent_select = ui.select({}, label='Breed or turtles').classes('w-full')
-        field_select = ui.select({}, label='Population fields', multiple=True).classes('w-full')
 
+        ui.label('Population fields').classes('text-subtitle2')
+        field_action_row = ui.row().classes('w-full items-center gap-2')
+        field_container = ui.column().classes('w-full gap-1 border rounded p-2 max-h-96 overflow-auto')
         preview_container = ui.column().classes('w-full gap-1')
+        field_checkboxes: dict[int, object] = {}
 
         def load_model_text(model_id: int | None) -> tuple[str, str] | None:
             if model_id is None:
@@ -454,22 +457,44 @@ def netlogo_population_package_page() -> None:
             set_select_options(agent_select, options, 'turtles' if 'turtles' in options else None)
 
         def refresh_fields() -> None:
+            field_container.clear()
+            field_checkboxes.clear()
+            preview_container.clear()
             study_id = int(selected_study.value) if selected_study.value is not None else None
             if study_id is None:
-                set_select_options(field_select, {})
+                with field_container:
+                    ui.label('Choose a population dataset first.').classes('text-body2 text-grey-7')
                 return
             with Session(ENGINE) as session:
                 questions = population_repo.list_questions(session, study_id=study_id, limit=2000)
-            options = {
-                int(question.id): f'{question.short_name or question.wording} [{question.kind.value}]'
-                for question in questions
-                if question.id is not None
-            }
-            set_select_options(field_select, options)
+            with field_container:
+                if not questions:
+                    ui.label('No fields found for this population dataset.').classes('text-body2 text-grey-7')
+                    return
+                for question in questions:
+                    if question.id is None:
+                        continue
+                    label = f'{question.short_name or question.wording} [{question.kind.value}]'
+                    field_checkboxes[int(question.id)] = ui.checkbox(label, on_change=lambda _: render_preview()).classes(
+                        'w-full'
+                    )
+
+        def selected_question_ids() -> list[int]:
+            return [
+                question_id
+                for question_id, checkbox in field_checkboxes.items()
+                if bool(checkbox.value)
+            ]
+
+        def set_all_fields(value: bool) -> None:
+            for checkbox in field_checkboxes.values():
+                checkbox.value = value
+                checkbox.update()
+            render_preview()
 
         def render_preview() -> None:
             preview_container.clear()
-            question_ids = [int(value) for value in (field_select.value or [])]
+            question_ids = selected_question_ids()
             if not question_ids:
                 return
             with Session(ENGINE) as session:
@@ -498,7 +523,7 @@ def netlogo_population_package_page() -> None:
         def generate_package() -> None:
             model_id = int(selected_model.value) if selected_model.value is not None else None
             study_id = int(selected_study.value) if selected_study.value is not None else None
-            question_ids = [int(value) for value in (field_select.value or [])]
+            question_ids = selected_question_ids()
             agent_kind = str(agent_select.value or '').strip()
             if model_id is None or study_id is None or not question_ids or not agent_kind:
                 status.set_text('Choose model, population dataset, fields, and agent type.')
@@ -525,7 +550,10 @@ def netlogo_population_package_page() -> None:
 
         selected_model.on('update:model-value', lambda _: refresh_agents())
         selected_study.on('update:model-value', lambda _: refresh_fields())
-        field_select.on('update:model-value', lambda _: render_preview())
+
+        with field_action_row:
+            ui.button('Select all', on_click=lambda: set_all_fields(True)).props('flat')
+            ui.button('Deselect all', on_click=lambda: set_all_fields(False)).props('flat')
 
         with ui.row().classes('w-full items-center gap-2'):
             ui.button('Generate package', on_click=generate_package, color='primary').props('outline')
@@ -650,7 +678,26 @@ def netlogo_adapters_page() -> None:
                     ).classes('w-full')
             render_existing_mappings(model_id)
 
-        def handle_generate() -> None:
+        def show_variable_warnings(warnings: list[str]) -> None:
+            with ui.dialog() as dialog, ui.card().classes('w-[90vw] max-w-2xl'):
+                ui.label('NetLogo variable warnings').classes('text-h6')
+                ui.label(
+                    'The generated model may reference variables that are not present in the selected NetLogo contexts.'
+                ).classes('text-body2')
+                with ui.column().classes('w-full gap-1'):
+                    for warning in warnings:
+                        ui.label(f'- {warning}').classes('text-body2')
+                with ui.row().classes('w-full justify-end gap-2'):
+                    ui.button('Cancel', on_click=dialog.close).props('flat')
+
+                    def continue_generation() -> None:
+                        dialog.close()
+                        handle_generate(skip_variable_warnings=True)
+
+                    ui.button('Continue and Download', on_click=continue_generation, color='warning')
+            dialog.open()
+
+        def handle_generate(*, skip_variable_warnings: bool = False) -> None:
             if selected_model.value is None:
                 status.set_text('Choose a model first.')
                 return
@@ -687,22 +734,21 @@ def netlogo_adapters_page() -> None:
 
             try:
                 original_text = model_path.read_text(encoding='utf-8')
-                model_variables = model_variable_names(original_text)
+                model_contexts = model_variable_contexts(original_text)
+                variable_warnings: list[str] = []
                 replacements: dict[str, str] = {}
                 with Session(ENGINE) as session:
                     for decision_id, procedure_name in mappings:
                         mapped_procedure = procedures_by_name.get(procedure_name)
                         if mapped_procedure is None:
                             raise ValueError(f'Procedure metadata missing for {procedure_name}.')
-                        missing_variables = sorted(
-                            set(netlogo_export_service.referenced_variable_names(session, decision_id))
-                            - model_variables
-                        )
-                        if missing_variables:
-                            missing_text = ', '.join(missing_variables)
-                            raise ValueError(
-                                f'Model variables required by {procedure_name} are not present: {missing_text}.'
+                        variable_warnings.extend(
+                            _missing_model_variable_warnings(
+                                netlogo_export_service.referenced_variable_contexts(session, decision_id),
+                                model_contexts,
+                                procedure_name,
                             )
+                        )
                         replacements[procedure_name] = netlogo_export_service.export_decision_reporter_named(
                             session,
                             decision_id,
@@ -711,6 +757,11 @@ def netlogo_adapters_page() -> None:
                             reporter_args=list(mapped_procedure.args),
                             outcome_rows_expr='choices',
                         )
+
+                if variable_warnings and not skip_variable_warnings:
+                    show_variable_warnings(variable_warnings)
+                    status.set_text('Review NetLogo variable warnings before generating.')
+                    return
 
                 generated_text = replace_procedures_in_model_text(original_text, replacements)
                 helper_program = netlogo_export_service.export_helper_library()
@@ -808,12 +859,27 @@ end''',
             'Variable Assumptions',
             [
                 'Injection does not create NetLogo globals, turtle variables, patch variables, or local variables for adapter expressions.',
-                'Generation checks that every variable emitted by decision conditions and linear adapter coefficients is present as a code declaration or `.nlogox` widget variable.',
                 'Every Behavior Manager variable used by conditions or linear adapter coefficients must already be valid in the scope where the generated reporter runs.',
                 'Behavior Manager variable names are sanitized into NetLogo identifiers: spaces and unsupported characters become hyphens, names are lowercased, repeated hyphens collapse, and names starting with a digit get an `r-` prefix.',
                 'For example, `Vegetarian Default` is referenced as `vegetarian-default` in generated NetLogo code.',
                 'Variable values must have the kind expected by the generated expression: numeric values for linear coefficients and comparable values for predicates.',
             ],
+        )
+
+        _guide_section(
+            'Variable Warnings',
+            [
+                'Before downloading, generation compares variables emitted by decision conditions and linear adapter coefficients against variables present in the NetLogo model.',
+                'The warning includes the NetLogo variable name and its expected Behavior Manager context, such as observer, turtle, patch, link, or a breed.',
+                'Code declarations provide model contexts: `globals` is observer context, and `*-own` declarations provide their owning agent context.',
+                'For `.nlogox` models, widget variables are treated as observer-context variables.',
+                'A warning does not block generation. Continue only if the generated reporter will still have a valid variable in its runtime scope.',
+            ],
+        )
+
+        _guide_code(
+            'Warning shape',
+            'Variable `reducer` does not exist in the turtle context for `choose-lunch`.',
         )
 
         _guide_section(
@@ -1085,6 +1151,25 @@ def _procedure_option_label(procedure) -> str:
     args = f' [{" ".join(procedure.args)}]' if procedure.args else ''
     kind = 'to-report' if procedure.is_reporter else 'to'
     return f'{kind} {procedure.name}{args}'
+
+
+def _missing_model_variable_warnings(
+    required_contexts: dict[str, set[str]],
+    model_contexts: dict[str, set[str]],
+    procedure_name: str,
+) -> list[str]:
+    warnings: list[str] = []
+    for variable_name, contexts in sorted(required_contexts.items()):
+        available_contexts = model_contexts.get(variable_name, set())
+        if contexts:
+            missing_contexts = contexts - available_contexts
+        else:
+            missing_contexts = set() if available_contexts else {'model'}
+        for context in sorted(missing_contexts):
+            warnings.append(
+                f'Variable `{variable_name}` does not exist in the {context} context for `{procedure_name}`.'
+            )
+    return warnings
 
 
 def _guide_section(title: str, items: list[str]) -> None:
