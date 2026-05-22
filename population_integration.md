@@ -226,7 +226,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `8997a92` `Add population workspace mapping pages`.
 9. Add matching execution pages.
    - Port batch matching, individual matching, estimation, validation, notes, and run-result views while persisting full batch run detail.
-   - Commit: pending.
+   - Commit: `80c726c` `Add population matching execution pages`.
 10. Add tests and parity fixtures.
    - Add importer, matching semantic, migration, and UI/server registration tests with small fixtures.
    - Commit: pending.
