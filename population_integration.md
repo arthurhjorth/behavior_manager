@@ -229,7 +229,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `80c726c` `Add population matching execution pages`.
 10. Add tests and parity fixtures.
    - Add importer, matching semantic, migration, and UI/server registration tests with small fixtures.
-   - Commit: pending.
+   - Commit: `120bc0a` `Add population integration tests`.
 11. Wire docs and cleanup.
    - Update navigation/docs and remove integrated runtime dependence on prototype file-backed outputs.
    - Commit: pending.
