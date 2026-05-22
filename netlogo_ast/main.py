@@ -153,7 +153,7 @@ class Parser:
         decls, procs = [], []
         while self.peek():
             tok = self.peek()
-            if tok.type == "IDENT" and tok.value in ("globals","breed","turtles-own","patches-own"):
+            if tok.type == "IDENT" and _is_declaration_keyword(tok.value):
                 decls.append(self.parse_declaration())
             elif tok.type == "IDENT" and tok.value in ("to","to-report"):
                 procs.append(self.parse_procedure())
@@ -817,6 +817,43 @@ def parse_model_text(model_text: str) -> Program:
     tokens = tokenize(extract_code_section(model_text))
     parser = Parser(tokens)
     return parser.parse_program()
+
+
+def declared_variable_names(program: Program) -> Set[str]:
+    return {
+        value.lower()
+        for declaration in program.declarations
+        if declaration.kind.lower() == "globals" or declaration.kind.lower().endswith("-own")
+        for value in declaration.values
+    }
+
+
+def model_variable_names(model_text: str) -> Set[str]:
+    return declared_variable_names(parse_model_text(model_text)) | _xml_widget_variable_names(model_text)
+
+
+def _is_declaration_keyword(name: str) -> bool:
+    return name in {"globals", "breed"} or name.endswith("-own")
+
+
+def _xml_widget_variable_names(model_text: str) -> Set[str]:
+    stripped = model_text.lstrip()
+    if not stripped.startswith('<?xml') and not stripped.startswith('<model'):
+        return set()
+
+    try:
+        root = ET.fromstring(model_text)
+    except ET.ParseError:
+        return set()
+
+    if root.tag != 'model':
+        return set()
+
+    return {
+        variable.lower()
+        for element in root.findall('.//*[@variable]')
+        if (variable := element.attrib.get('variable'))
+    }
 
 
 def replace_code_section(model_text: str, new_code: str) -> str:

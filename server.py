@@ -7,6 +7,7 @@ from nicegui.events import UploadEventArguments
 from sqlmodel import Session
 
 from netlogo_ast.main import (
+    model_variable_names,
     parse_model_text,
     replace_procedures_in_model_text,
     summarize_procedures,
@@ -549,12 +550,22 @@ def netlogo_adapters_page() -> None:
 
             try:
                 original_text = model_path.read_text(encoding='utf-8')
+                model_variables = model_variable_names(original_text)
                 replacements: dict[str, str] = {}
                 with Session(ENGINE) as session:
                     for decision_id, procedure_name in mappings:
                         mapped_procedure = procedures_by_name.get(procedure_name)
                         if mapped_procedure is None:
                             raise ValueError(f'Procedure metadata missing for {procedure_name}.')
+                        missing_variables = sorted(
+                            set(netlogo_export_service.referenced_variable_names(session, decision_id))
+                            - model_variables
+                        )
+                        if missing_variables:
+                            missing_text = ', '.join(missing_variables)
+                            raise ValueError(
+                                f'Model variables required by {procedure_name} are not present: {missing_text}.'
+                            )
                         replacements[procedure_name] = netlogo_export_service.export_decision_reporter_named(
                             session,
                             decision_id,
@@ -660,6 +671,7 @@ end''',
             'Variable Assumptions',
             [
                 'Injection does not create NetLogo globals, turtle variables, patch variables, or local variables for adapter expressions.',
+                'Generation checks that every variable emitted by decision conditions and linear adapter coefficients is present as a code declaration or `.nlogox` widget variable.',
                 'Every Behavior Manager variable used by conditions or linear adapter coefficients must already be valid in the scope where the generated reporter runs.',
                 'Behavior Manager variable names are sanitized into NetLogo identifiers: spaces and unsupported characters become hyphens, names are lowercased, repeated hyphens collapse, and names starting with a digit get an `r-` prefix.',
                 'For example, `Vegetarian Default` is referenced as `vegetarian-default` in generated NetLogo code.',
