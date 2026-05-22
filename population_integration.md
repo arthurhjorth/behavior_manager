@@ -205,7 +205,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `574df51` `Add population data ORM models`.
 2. Add matching ORM foundations.
    - Add workspace/config, mapping, mapping-input, transform/comparator spec, normalized parameter, notes, audit, run, match, and feature-distance tables.
-   - Commit: pending.
+   - Commit: `4850da9` `Add population matching ORM models`.
 3. Add population repositories.
    - Add DB query/write helpers for population artifacts, studies, questions, people, and responses.
    - Commit: pending.
