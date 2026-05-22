@@ -202,7 +202,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
 
 1. Add population ORM foundations.
    - Add population-specific enums and SQLModel tables for artifacts, studies, questions, people, responses, source refs, scales/options, attributes, and weights.
-   - Commit: pending.
+   - Commit: `574df51` `Add population data ORM models`.
 2. Add matching ORM foundations.
    - Add workspace/config, mapping, mapping-input, transform/comparator spec, normalized parameter, notes, audit, run, match, and feature-distance tables.
    - Commit: pending.
