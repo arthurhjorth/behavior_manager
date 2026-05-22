@@ -9,6 +9,23 @@ from repositories import decision_repo
 
 
 def export_decision_reporter(session: Session, decision_id: int) -> str:
+    return export_decision_reporter_named(
+        session,
+        decision_id,
+        reporter_name=None,
+        include_helpers=True,
+    )
+
+
+def export_decision_reporter_named(
+    session: Session,
+    decision_id: int,
+    *,
+    reporter_name: str | None,
+    include_helpers: bool,
+    reporter_args: list[str] | None = None,
+    outcome_rows_expr: str | None = None,
+) -> str:
     decision = decision_repo.get_decision(session, decision_id)
     if decision is None:
         raise ValueError(f'Decision {decision_id} not found')
@@ -21,16 +38,21 @@ def export_decision_reporter(session: Session, decision_id: int) -> str:
     variable_name_by_id = {int(variable.id): variable.name for variable in variables if variable.id is not None}
     outcome_name_by_id = {int(outcome.id): outcome.name for outcome in outcomes if outcome.id is not None}
 
-    reporter_name = _sanitize_identifier(decision.name)
+    resolved_reporter_name = reporter_name or _sanitize_identifier(decision.name)
     lines: list[str] = []
-    lines.extend(_netlogo_helper_library_lines())
-    lines.append('')
-    lines.append(f'to-report {reporter_name}')
-    initial_rows = ' '.join(
-        f'(list {_quote(outcome.name)} {_fmt(float(outcome.likelihood) if outcome.likelihood is not None else 0.0)})'
-        for outcome in outcomes
-    )
-    lines.append(f'  let __outcomes (list {initial_rows})')
+    if include_helpers:
+        lines.extend(_netlogo_helper_library_lines())
+        lines.append('')
+    signature_args = f' [{" ".join(reporter_args)}]' if reporter_args else ''
+    lines.append(f'to-report {resolved_reporter_name}{signature_args}')
+    if outcome_rows_expr is None:
+        initial_rows = ' '.join(
+            f'(list {_quote(outcome.name)} {_fmt(float(outcome.likelihood) if outcome.likelihood is not None else 0.0)})'
+            for outcome in outcomes
+        )
+        lines.append(f'  let __outcomes (list {initial_rows})')
+    else:
+        lines.append(f'  let __outcomes {outcome_rows_expr}')
 
     step_index = 0
     for adapter_set in decision_repo.list_adapter_sets(session, decision_id):
@@ -56,6 +78,34 @@ def export_decision_reporter(session: Session, decision_id: int) -> str:
     lines.append('  report (bm-normalize __outcomes)')
     lines.append('end')
     return '\n'.join(lines)
+
+
+def export_helper_library() -> str:
+    return '\n'.join(_netlogo_helper_library_lines())
+
+
+def referenced_variable_names(session: Session, decision_id: int) -> list[str]:
+    variable_name_by_id = _variable_name_by_id(session)
+    names: dict[str, None] = {}
+
+    for adapter_set in decision_repo.list_adapter_sets(session, decision_id):
+        effects = decision_repo.list_adapters(session, adapter_set_id=int(adapter_set.id))
+        if not effects:
+            continue
+        for chain in decision_repo.list_chains(session, int(adapter_set.id)):
+            for predicate in decision_repo.list_predicates(session, int(chain.id)):
+                variable_name = variable_name_by_id.get(predicate.variable_id)
+                if variable_name is not None:
+                    names.setdefault(_sanitize_identifier(variable_name), None)
+
+        for effect in effects:
+            if effect.adapter_type != AdapterType.linear:
+                continue
+            for coefficient in decision_repo.list_coefficients(session, int(effect.id)):
+                variable_name = variable_name_by_id.get(coefficient.variable_id, f'var-{coefficient.variable_id}')
+                names.setdefault(_sanitize_identifier(variable_name), None)
+
+    return list(names)
 
 
 def _netlogo_helper_library_lines() -> list[str]:
@@ -184,8 +234,7 @@ def _binary_effect_lines(effect, target_literal: str) -> list[str]:
 
 def _linear_effect_lines(effect, step_index: int, target_literal: str, session: Session) -> list[str]:
     coeffs = decision_repo.list_coefficients(session, int(effect.id))
-    variables = decision_repo.list_variables(session)
-    variable_name_by_id = {int(variable.id): variable.name for variable in variables if variable.id is not None}
+    variable_name_by_id = _variable_name_by_id(session)
 
     terms = [_fmt(effect.intercept or 0.0)]
     for coefficient in coeffs:
@@ -209,6 +258,14 @@ def _linear_effect_lines(effect, step_index: int, target_literal: str, session: 
     else:
         lines.append(f'set __outcomes (bm-apply-multiply __outcomes {target_literal} {tmp_var})')
     return lines
+
+
+def _variable_name_by_id(session: Session) -> dict[int, str]:
+    return {
+        int(variable.id): variable.name
+        for variable in decision_repo.list_variables(session)
+        if variable.id is not None
+    }
 
 
 def _predicate_value_literal(predicate) -> str:

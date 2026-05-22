@@ -12,7 +12,7 @@ For scientific modelling, we want these probability distributions to be evidence
 * an agent behavior or agent change, and
 * the specific implementation and its effect on outcome probabilities
 
-This project tries to provide [meaningful building blocks](docs/core_mechanics.md) for that. It also contains a [nicegui-based GUI server](docs/server_workflow.md) for working with these building blocks.
+This project tries to provide [meaningful building blocks](docs/core_mechanics.md) for that. It also contains a [nicegui-based GUI server](docs/server_workflow.md) for working with these building blocks and a DB-backed [population module](docs/population_module.md) for importing population workbooks and running matching workflows.
 
 
 # Installing and running

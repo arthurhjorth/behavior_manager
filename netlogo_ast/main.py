@@ -33,6 +33,7 @@ class Procedure(ASTNode):
     name: str
     args: List[str]
     body: "Block"
+    is_reporter: bool = False
 
 @dataclass
 class Block(ASTNode):
@@ -152,7 +153,7 @@ class Parser:
         decls, procs = [], []
         while self.peek():
             tok = self.peek()
-            if tok.type == "IDENT" and tok.value in ("globals","breed","turtles-own","patches-own"):
+            if tok.type == "IDENT" and _is_declaration_keyword(tok.value):
                 decls.append(self.parse_declaration())
             elif tok.type == "IDENT" and tok.value in ("to","to-report"):
                 procs.append(self.parse_procedure())
@@ -172,14 +173,14 @@ class Parser:
         return Declaration(kind=kind, values=values)
 
     def parse_procedure(self) -> Procedure:
-        self.expect("IDENT")  # to / to-report
+        kind = self.expect("IDENT").value  # to / to-report
         name = self.expect("IDENT").value
         args = []
         if self.match("LBRACK"):
             while not self.match("RBRACK"):
                 args.append(self.expect("IDENT").value)
         body = self.parse_block_until_end()
-        return Procedure(name=name, args=args, body=body)
+        return Procedure(name=name, args=args, body=body, is_reporter=kind == "to-report")
 
     def parse_block_until_end(self) -> Block:
         stmts = []
@@ -509,6 +510,7 @@ class ProcedureSummary:
     called_by: List[str]
     args: List[str]
     variables_changed: List[str]
+    is_reporter: bool
 
     def to_dict(self) -> dict:
         return {
@@ -516,6 +518,7 @@ class ProcedureSummary:
             "called_by": self.called_by,
             "args": self.args,
             "variables_changed": self.variables_changed,
+            "is_reporter": self.is_reporter,
         }
 
 def collect_let_names(block: Block, *, sink: Optional[Set[str]] = None) -> Set[str]:
@@ -816,6 +819,123 @@ def parse_model_text(model_text: str) -> Program:
     return parser.parse_program()
 
 
+def declared_variable_names(program: Program) -> Set[str]:
+    return {
+        value.lower()
+        for declaration in program.declarations
+        if declaration.kind.lower() == "globals" or declaration.kind.lower().endswith("-own")
+        for value in declaration.values
+    }
+
+
+def model_variable_names(model_text: str) -> Set[str]:
+    return declared_variable_names(parse_model_text(model_text)) | _xml_widget_variable_names(model_text)
+
+
+def _is_declaration_keyword(name: str) -> bool:
+    return name in {"globals", "breed"} or name.endswith("-own")
+
+
+def _xml_widget_variable_names(model_text: str) -> Set[str]:
+    stripped = model_text.lstrip()
+    if not stripped.startswith('<?xml') and not stripped.startswith('<model'):
+        return set()
+
+    try:
+        root = ET.fromstring(model_text)
+    except ET.ParseError:
+        return set()
+
+    if root.tag != 'model':
+        return set()
+
+    return {
+        variable.lower()
+        for element in root.findall('.//*[@variable]')
+        if (variable := element.attrib.get('variable'))
+    }
+
+
+def replace_code_section(model_text: str, new_code: str) -> str:
+    if _extract_code_from_xml_model(model_text) is not None:
+        return _replace_code_in_xml_model(model_text, new_code)
+
+    separator = '@#$#@#$#@'
+    if separator not in model_text:
+        return new_code
+    _, remainder = model_text.split(separator, 1)
+    return new_code + separator + remainder
+
+
+def replace_procedures_in_model_text(model_text: str, replacements: Dict[str, str]) -> str:
+    code = extract_code_section(model_text)
+    updated_code = replace_procedures_in_code(code, replacements)
+    return replace_code_section(model_text, updated_code)
+
+
+def replace_procedures_in_code(code: str, replacements: Dict[str, str]) -> str:
+    updated = code
+    missing: List[str] = []
+    for procedure_name, new_procedure in replacements.items():
+        updated, count = _replace_single_procedure(updated, procedure_name, new_procedure)
+        if count == 0:
+            missing.append(procedure_name)
+    if missing:
+        raise ValueError(f"Procedures not found in model: {', '.join(missing)}")
+    return updated
+
+
+def upsert_procedures_in_model_text(model_text: str, procedures: Dict[str, str]) -> str:
+    code = extract_code_section(model_text)
+    updated_code = upsert_procedures_in_code(code, procedures)
+    return replace_code_section(model_text, updated_code)
+
+
+def upsert_procedures_in_code(code: str, procedures: Dict[str, str]) -> str:
+    updated = code.rstrip()
+    for procedure_name, new_procedure in procedures.items():
+        updated, count = _replace_single_procedure(updated, procedure_name, new_procedure)
+        if count == 0:
+            if updated:
+                updated += '\n\n'
+            updated += new_procedure.strip() + '\n'
+    return updated
+
+
+def _replace_single_procedure(code: str, procedure_name: str, new_procedure: str) -> tuple[str, int]:
+    pattern = re.compile(
+        rf'(?ims)^[ \t]*(?:to|to-report)\s+{re.escape(procedure_name)}(?=[\s\[]|$).*?^[ \t]*end[ \t]*$'
+    )
+    replacement = new_procedure.strip()
+    updated, count = pattern.subn(replacement, code, count=1)
+    return updated, count
+
+
+def _replace_code_in_xml_model(model_text: str, new_code: str) -> str:
+    cdata_pattern = re.compile(r'(<code>\s*<!\[CDATA\[)(.*?)(\]\]>\s*</code>)', re.DOTALL)
+    if cdata_pattern.search(model_text):
+        return cdata_pattern.sub(
+            lambda match: match.group(1) + new_code + match.group(3),
+            model_text,
+            count=1,
+        )
+
+    plain_pattern = re.compile(r'(<code>)(.*?)(</code>)', re.DOTALL)
+    if plain_pattern.search(model_text):
+        escaped = (
+            new_code.replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+        )
+        return plain_pattern.sub(
+            lambda match: match.group(1) + escaped + match.group(3),
+            model_text,
+            count=1,
+        )
+
+    raise ValueError('NetLogo XML model is missing a <code> element.')
+
+
 def summarize_procedures(program: Program) -> List[ProcedureSummary]:
     lookup = {proc.name.lower(): proc for proc in program.procedures}
     globals_lower: Set[str] = {
@@ -843,6 +963,7 @@ def summarize_procedures(program: Program) -> List[ProcedureSummary]:
                     memo=memo,
                 ).values()
             ),
+            is_reporter=proc.is_reporter,
         )
         for proc in program.procedures
     ]

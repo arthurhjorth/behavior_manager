@@ -12,6 +12,7 @@ The server gives you a way to work with the persistent versions of the concepts 
 - contexts
 - datasets
 - adapter sets and their conditions/effects
+- population studies and matching workspaces
 
 At a high level, the workflow is:
 
@@ -21,6 +22,7 @@ At a high level, the workflow is:
 4. Create adapter sets that encode evidence-informed changes to outcome likelihoods.
 5. Attach those adapter sets to studies so the evidence source is explicit.
 6. Test and export decisions.
+7. Import population workbooks and run population matching workflows when model calibration requires respondent-level data.
 
 ## Typical Workflow in the GUI
 
@@ -51,6 +53,10 @@ When editing an adapter set, you can assign it to a study in the database. This 
 ### 6. Test and Export
 
 Decisions can be tested in the GUI and exported to NetLogo-oriented code paths where relevant.
+
+### 7. Import and Match Population Data
+
+Use the `Population` pages to import `.xlsx` population workbooks, browse people/questions, create matching workspaces, map variables between two studies, and run weighted nearest-neighbor matching. See [Population Module](population_module.md) for the dedicated workflow.
 
 ## Related Pages
 
