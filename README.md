@@ -24,3 +24,12 @@ python server.py
 ```
 
 This will start the server on port `8080`.
+
+
+# Creating database with population studies
+
+You can add individual XLS files but if we want to add all our population datasets in one go and avoid having to configure them individually, then first copy the `popuation_data` folder from the shared BSS SharePoint/Task 1. Then run
+
+`.venv/bin/python services/population_migration_service.py`
+
+It's about 400MB of data, so it takes a while. but this will put all the population studies, questionnaire-items, and respones per individual in the local sqlite databse
