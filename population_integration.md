@@ -223,7 +223,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `9dcc477` `Add DB-backed population matching services`.
 8. Add workspace and mapping pages.
    - Port workspace/config selection and variable-set mapping management pages.
-   - Commit: pending.
+   - Commit: `8997a92` `Add population workspace mapping pages`.
 9. Add matching execution pages.
    - Port batch matching, individual matching, estimation, validation, notes, and run-result views while persisting full batch run detail.
    - Commit: pending.
