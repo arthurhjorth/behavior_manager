@@ -217,7 +217,7 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `56ee702` `Add population prototype migration service`.
 6. Add population browse pages.
    - Register population study, person/response, question, and import pages under existing server navigation.
-   - Commit: pending.
+   - Commit: `b1e4359` `Add population browse and import pages`.
 7. Add matching repositories and services.
    - Move transform, comparator, distance, matching, estimation, and validation logic into DB-backed matching services.
    - Commit: pending.
