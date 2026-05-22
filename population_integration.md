@@ -232,4 +232,4 @@ Avoid naming collisions with existing top-level `models.py` concepts by using po
    - Commit: `120bc0a` `Add population integration tests`.
 11. Wire docs and cleanup.
    - Update navigation/docs and remove integrated runtime dependence on prototype file-backed outputs.
-   - Commit: pending.
+   - Commit: `c79eecf` `Document population module workflow`.
