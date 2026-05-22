@@ -12,4 +12,15 @@ For scientific modelling, we want these probability distributions to be evidence
 * an agent behavior or agent change, and
 * the specific implementation and its effect on outcome probabilities
 
-This project tries to provide [meaningful building blocks](docs/core_mechanics.md) for that. It also contains a [GUI server](docs/server_workflow.md) for working with these building blocks.
+This project tries to provide [meaningful building blocks](docs/core_mechanics.md) for that. It also contains a [nicegui-based GUI server](docs/server_workflow.md) for working with these building blocks.
+
+
+# Installing and running
+```
+git@github.com:arthurhjorth/behavior_manager.git
+cd behavior_manager
+pip install -r requirements.txt
+python server.py
+```
+
+This will start the server on port `8080`.
