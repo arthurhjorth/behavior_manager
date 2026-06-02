@@ -135,3 +135,9 @@ Person/response:
   - Added XLSX DB wrappers for importing a strict workbook and exporting one DB study.
   - Covered DB persistence, idempotent re-import, and DB-backed XLSX export in tests.
   - Verified with `unittest` for the XLSX tests and existing population integration tests.
+- `dbc9177` `Add strict XLSX import export UI`
+  - Added strict workbook detection to the population XLSX upload page.
+  - Added a preview dialog before strict workbook import; confirmed imports write through the Pydantic dataset import layer.
+  - Kept legacy XLSX import behavior for non-strict workbooks.
+  - Added XLSX download support to the export dialog for exactly one selected study.
+  - Preserved uploaded filenames in strict workbook source references instead of storing temporary file paths.
