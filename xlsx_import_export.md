@@ -130,3 +130,8 @@ Person/response:
   - Covered valid strict workbook parsing, XLSX round-trip, missing sheets, unknown response columns, unknown option question codes, duplicate question codes, duplicate person IDs, and invalid `data_kind`.
   - Tightened reader validation so `options.question_code` values must refer to known questions.
   - Verified with `unittest` for the new XLSX tests and existing population integration tests.
+- `e45c82a` `Add strict XLSX DB import helpers`
+  - Added `PopulationDataset` -> DB import helpers with skip-existing behavior.
+  - Added XLSX DB wrappers for importing a strict workbook and exporting one DB study.
+  - Covered DB persistence, idempotent re-import, and DB-backed XLSX export in tests.
+  - Verified with `unittest` for the XLSX tests and existing population integration tests.
