@@ -86,7 +86,11 @@ def read_population_xlsx(path: Path) -> PopulationDataset:
     study = _read_study(workbook["study"], path)
     option_rows = _read_options(workbook["options"]) if "options" in workbook.sheetnames else {}
     questions = _read_questions(workbook["questions"], study.id, path, option_rows)
-    people = _read_responses(workbook["responses"], study.id, path, {question.id for question in questions}, option_rows)
+    question_ids = {question.id for question in questions}
+    unknown_option_codes = sorted(set(option_rows) - question_ids)
+    if unknown_option_codes:
+        raise ValueError(f"Options reference unknown question codes: {', '.join(unknown_option_codes)}")
+    people = _read_responses(workbook["responses"], study.id, path, question_ids, option_rows)
     dataset = PopulationDataset(
         studies=[study],
         questions=questions,
