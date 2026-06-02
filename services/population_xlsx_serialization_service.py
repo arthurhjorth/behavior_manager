@@ -80,20 +80,21 @@ class ValidationIssue:
     severity: str = "error"
 
 
-def read_population_xlsx(path: Path) -> PopulationDataset:
+def read_population_xlsx(path: Path, *, source_file_path: str | None = None) -> PopulationDataset:
     workbook = load_workbook(path, read_only=True, data_only=True)
     issues = _workbook_shape_issues(workbook.sheetnames)
     if issues:
         raise ValueError(_issue_summary(issues))
 
-    study = _read_study(workbook["study"], path)
+    source_path = source_file_path or str(path)
+    study = _read_study(workbook["study"], path, source_path)
     option_rows = _read_options(workbook["options"]) if "options" in workbook.sheetnames else {}
-    questions = _read_questions(workbook["questions"], study.id, path, option_rows)
+    questions = _read_questions(workbook["questions"], study.id, source_path, option_rows)
     question_ids = {question.id for question in questions}
     unknown_option_codes = sorted(set(option_rows) - question_ids)
     if unknown_option_codes:
         raise ValueError(f"Options reference unknown question codes: {', '.join(unknown_option_codes)}")
-    people = _read_responses(workbook["responses"], study.id, path, question_ids, option_rows)
+    people = _read_responses(workbook["responses"], study.id, source_path, question_ids, option_rows)
     dataset = PopulationDataset(
         studies=[study],
         questions=questions,
@@ -136,8 +137,9 @@ def import_population_xlsx(
     path: Path,
     *,
     skip_existing: bool = True,
+    source_file_path: str | None = None,
 ) -> PopulationDatasetImportResult:
-    dataset = read_population_xlsx(path)
+    dataset = read_population_xlsx(path, source_file_path=source_file_path)
     return population_serialization_service.import_population_dataset(session, dataset, skip_existing=skip_existing)
 
 
@@ -220,7 +222,7 @@ def _workbook_shape_issues(sheet_names: Iterable[str]) -> list[ValidationIssue]:
     return [issue for issue in issues if issue.severity == "error"]
 
 
-def _read_study(sheet: Worksheet, path: Path) -> Study:
+def _read_study(sheet: Worksheet, path: Path, source_path: str) -> Study:
     values = {
         str(row[0]).strip(): _cell_value(row[1])
         for row in _data_rows(sheet)
@@ -230,7 +232,7 @@ def _read_study(sheet: Worksheet, path: Path) -> Study:
     return Study(
         id=str(study_id),
         name=str(values.get("name") or study_id),
-        source_file=str(values.get("source_file") or path.name),
+        source_file=str(values.get("source_file") or Path(source_path).name),
         source_sheet=_optional_str(values.get("source_sheet")),
         description=_optional_str(values.get("description")),
         collected_at=_optional_str(values.get("collected_at")),
@@ -245,7 +247,7 @@ def _read_study(sheet: Worksheet, path: Path) -> Study:
 def _read_questions(
     sheet: Worksheet,
     study_id: str,
-    path: Path,
+    source_path: str,
     option_rows: dict[str, list[Option]],
 ) -> list[Question]:
     rows = _dict_rows(sheet)
@@ -265,7 +267,7 @@ def _read_questions(
                 "study_id": study_id,
                 "wording": str(row.get("wording") or row.get("question_text") or code),
                 "source": SourceRef(
-                    file_path=str(path),
+                    file_path=source_path,
                     sheet_name=sheet.title,
                     row_index=index,
                     column_index=1,
@@ -303,7 +305,7 @@ def _read_options(sheet: Worksheet) -> dict[str, list[Option]]:
 def _read_responses(
     sheet: Worksheet,
     study_id: str,
-    path: Path,
+    source_path: str,
     question_ids: set[str],
     option_rows: dict[str, list[Option]],
 ) -> list[Person]:
@@ -337,7 +339,7 @@ def _read_responses(
                     question_id=question_id,
                     value=_response_value(raw, option_rows.get(question_id, [])),
                     source=SourceRef(
-                        file_path=str(path),
+                        file_path=source_path,
                         sheet_name=sheet.title,
                         row_index=row_index,
                         column_index=column_index,
@@ -350,7 +352,7 @@ def _read_responses(
                 id=person_id,
                 study_id=study_id,
                 source_person_id=person_id,
-                source=SourceRef(file_path=str(path), sheet_name=sheet.title, row_index=row_index),
+                source=SourceRef(file_path=source_path, sheet_name=sheet.title, row_index=row_index),
                 responses=responses,
             )
         )

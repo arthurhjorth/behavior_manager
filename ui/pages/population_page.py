@@ -20,7 +20,12 @@ from models import (
     PopulationTransformKind,
 )
 from repositories import population_matching_repo, population_repo
-from services import population_import_service, population_matching_service, population_serialization_service
+from services import (
+    population_import_service,
+    population_matching_service,
+    population_serialization_service,
+    population_xlsx_serialization_service,
+)
 from ui.components.page_shell import page_shell
 
 
@@ -194,7 +199,7 @@ def _open_population_export_dialog(engine) -> None:
                 ).classes('w-full')
         status = ui.label('').classes('text-body2 text-grey-7')
 
-        def export_selected() -> None:
+        def export_selected_json() -> None:
             study_ids = [study_id for study_id, checkbox in selected.items() if checkbox.value]
             if not study_ids:
                 ui.notify('Select at least one dataset.', color='warning')
@@ -211,9 +216,37 @@ def _open_population_export_dialog(engine) -> None:
             ui.download(content, filename=filename, media_type='application/json')
             status.set_text(f'Exported {len(dataset.studies)} studies, {len(dataset.questions)} questions, {len(dataset.people)} people.')
 
+        def export_selected_xlsx() -> None:
+            study_ids = [study_id for study_id, checkbox in selected.items() if checkbox.value]
+            if len(study_ids) != 1:
+                ui.notify('XLSX export requires exactly one selected dataset.', color='warning')
+                return
+            status.set_text('Building XLSX export...')
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                temp_path = Path(tmp.name)
+            try:
+                with Session(engine) as export_session:
+                    dataset = population_xlsx_serialization_service.export_population_xlsx(
+                        export_session,
+                        study_id=study_ids[0],
+                        path=temp_path,
+                        include_people=bool(include_people.value),
+                    )
+                content = temp_path.read_bytes()
+            finally:
+                temp_path.unlink(missing_ok=True)
+            filename = _population_export_filename(study_ids, bool(include_people.value), suffix='xlsx')
+            ui.download(
+                content,
+                filename=filename,
+                media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            )
+            status.set_text(f'Exported {len(dataset.questions)} questions and {len(dataset.people)} people to XLSX.')
+
         with ui.row().classes('w-full justify-end gap-2'):
             ui.button('Cancel', on_click=dialog.close).props('flat')
-            ui.button('Download JSON', on_click=export_selected)
+            ui.button('Download JSON', on_click=export_selected_json)
+            ui.button('Download XLSX', on_click=export_selected_xlsx).props('outline')
     dialog.open()
 
 
@@ -339,7 +372,7 @@ def _render_question_browser(engine) -> None:
 def _render_workbook_import(engine) -> None:
     ui.label('Import XLSX').classes('text-h5')
     ui.label(
-        'Data workbooks import one study per populated sheet. Filenames containing `question-items` import question catalogs.'
+        'Strict workbooks use study, questions, options, and responses sheets. Legacy data workbooks are still supported.'
     ).classes('text-body2')
     status = ui.label('Upload a .xlsx workbook.').classes('text-caption text-grey-7')
 
@@ -352,6 +385,10 @@ def _render_workbook_import(engine) -> None:
             temp_path = Path(tmp.name)
         await event.file.save(temp_path)
         try:
+            if population_xlsx_serialization_service.is_strict_population_xlsx(temp_path):
+                dataset = population_xlsx_serialization_service.read_population_xlsx(temp_path, source_file_path=filename)
+                _open_strict_import_preview_dialog(engine, filename, dataset, status)
+                return
             content = temp_path.read_bytes()
             with Session(engine) as session:
                 result = population_import_service.import_workbook_bytes(session, filename=filename, content=content)
@@ -371,6 +408,47 @@ def _render_workbook_import(engine) -> None:
         ui.link('Population studies', '/population/studies')
         ui.link('Question browser', '/population/questions')
         ui.link('Matching workspaces', '/population/workspaces')
+
+
+def _open_strict_import_preview_dialog(engine, filename: str, dataset, status_label) -> None:
+    study = dataset.studies[0]
+    people_count = len(dataset.people)
+    response_count = sum(len(person.responses) for person in dataset.people)
+    dialog = ui.dialog()
+    with dialog, ui.card().classes('w-full max-w-2xl gap-4'):
+        ui.label('Import strict population workbook').classes('text-h6')
+        ui.label(filename).classes('text-body2 text-grey-7')
+        with ui.column().classes('w-full gap-1'):
+            ui.label(f'Study: {study.name} ({study.id})')
+            ui.label(f'Questions: {len(dataset.questions)}')
+            ui.label(f'People: {people_count}')
+            ui.label(f'Responses: {response_count}')
+            ui.label('Existing studies, questions, and people with the same external IDs will be skipped.').classes(
+                'text-caption text-grey-7'
+            )
+        preview_status = ui.label('').classes('text-body2 text-grey-7')
+
+        def confirm_import() -> None:
+            preview_status.set_text('Importing...')
+            try:
+                with Session(engine) as session:
+                    result = population_serialization_service.import_population_dataset(session, dataset, skip_existing=True)
+                    session.commit()
+            except Exception as exc:
+                preview_status.set_text(f'Import failed: {exc}')
+                return
+            status_label.set_text(
+                f'Imported {filename}: {result.studies_created} studies, {result.questions_created} questions, '
+                f'{result.people_created} people, {result.responses_created} responses. '
+                f'Skipped {result.studies_skipped + result.questions_skipped + result.people_skipped} existing objects.'
+            )
+            ui.notify('Strict population workbook imported.', color='positive')
+            dialog.close()
+
+        with ui.row().classes('w-full justify-end gap-2'):
+            ui.button('Cancel', on_click=dialog.close).props('flat')
+            ui.button('Import', on_click=confirm_import, color='primary')
+    dialog.open()
 
 
 def _render_workspaces(engine) -> None:
@@ -840,11 +918,11 @@ def _source_label(source_file: str, source_sheet: str | None) -> str:
     return f'{source_file} | {source_sheet}' if source_sheet else source_file
 
 
-def _population_export_filename(study_ids: list[int], include_people: bool) -> str:
+def _population_export_filename(study_ids: list[int], include_people: bool, suffix: str = 'json') -> str:
     scope = 'full' if include_people else 'questions'
     if len(study_ids) == 1:
-        return f'population_export_study_{study_ids[0]}_{scope}.json'
-    return f'population_export_{len(study_ids)}_studies_{scope}.json'
+        return f'population_export_study_{study_ids[0]}_{scope}.{suffix}'
+    return f'population_export_{len(study_ids)}_studies_{scope}.{suffix}'
 
 
 def _value_label(value_json: str) -> str:
