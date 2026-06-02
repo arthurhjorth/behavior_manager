@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from nicegui import ui
 from nicegui.events import UploadEventArguments
@@ -19,7 +20,7 @@ from models import (
     PopulationTransformKind,
 )
 from repositories import population_matching_repo, population_repo
-from services import population_import_service, population_matching_service
+from services import population_import_service, population_matching_service, population_serialization_service
 from ui.components.page_shell import page_shell
 
 
@@ -136,6 +137,7 @@ def _render_population_studies(engine) -> None:
         ui.link('Browse questions', '/population/questions')
         ui.link('Import XLSX', '/population/import')
         ui.link('Matching workspaces', '/population/workspaces')
+        ui.button('Export datasets', on_click=lambda: _open_population_export_dialog(engine)).props('outline')
     with Session(engine) as session:
         studies = population_repo.list_studies(session)
         counts = {
@@ -161,6 +163,58 @@ def _render_population_studies(engine) -> None:
             ui.label(str(questions))
             ui.label(_source_label(study.source_file, study.source_sheet)).classes('break-words text-body2 text-grey-7')
             ui.button('Open', on_click=lambda sid=study.id: ui.navigate.to(f'/population/studies/{int(sid)}')).props('flat')
+
+
+def _open_population_export_dialog(engine) -> None:
+    with Session(engine) as session:
+        studies = population_repo.list_studies(session)
+        counts = {
+            int(study.id): (population_repo.count_people(session, int(study.id)), population_repo.count_questions(session, int(study.id)))
+            for study in studies
+            if study.id is not None
+        }
+    if not studies:
+        ui.notify('No population studies to export.', color='warning')
+        return
+
+    selected: dict[int, Any] = {}
+    dialog = ui.dialog()
+    with dialog, ui.card().classes('w-full max-w-4xl gap-4'):
+        ui.label('Export population datasets').classes('text-h6')
+        include_people = ui.checkbox('Include people and responses', value=True)
+        ui.label('Choose datasets').classes('text-subtitle2')
+        with ui.column().classes('w-full gap-1 max-h-96 overflow-auto'):
+            for study in studies:
+                if study.id is None:
+                    continue
+                people, questions = counts.get(int(study.id), (0, 0))
+                selected[int(study.id)] = ui.checkbox(
+                    f'{study.name} ({people} people, {questions} questions)',
+                    value=True,
+                ).classes('w-full')
+        status = ui.label('').classes('text-body2 text-grey-7')
+
+        def export_selected() -> None:
+            study_ids = [study_id for study_id, checkbox in selected.items() if checkbox.value]
+            if not study_ids:
+                ui.notify('Select at least one dataset.', color='warning')
+                return
+            status.set_text('Building export...')
+            with Session(engine) as export_session:
+                dataset = population_serialization_service.export_population_dataset(
+                    export_session,
+                    study_ids=study_ids,
+                    include_people=bool(include_people.value),
+                )
+            content = dataset.model_dump_json(indent=2).encode('utf-8')
+            filename = _population_export_filename(study_ids, bool(include_people.value))
+            ui.download(content, filename=filename, media_type='application/json')
+            status.set_text(f'Exported {len(dataset.studies)} studies, {len(dataset.questions)} questions, {len(dataset.people)} people.')
+
+        with ui.row().classes('w-full justify-end gap-2'):
+            ui.button('Cancel', on_click=dialog.close).props('flat')
+            ui.button('Download JSON', on_click=export_selected)
+    dialog.open()
 
 
 def _render_study_detail(engine, study_id: int) -> None:
@@ -784,6 +838,13 @@ def _render_workspace_notes(engine, workspace_id: int) -> None:
 
 def _source_label(source_file: str, source_sheet: str | None) -> str:
     return f'{source_file} | {source_sheet}' if source_sheet else source_file
+
+
+def _population_export_filename(study_ids: list[int], include_people: bool) -> str:
+    scope = 'full' if include_people else 'questions'
+    if len(study_ids) == 1:
+        return f'population_export_study_{study_ids[0]}_{scope}.json'
+    return f'population_export_{len(study_ids)}_studies_{scope}.json'
 
 
 def _value_label(value_json: str) -> str:

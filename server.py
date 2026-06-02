@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 from nicegui import app, ui
@@ -1187,6 +1188,6 @@ def _guide_code(title: str, code: str) -> None:
 
 
 if __name__ in {'__main__', '__mp_main__'}:
-    ui.run(prod_js=False, port=8002)
+    ui.run(prod_js=False, port=int(os.environ.get('PORT', '8002')))
 else:
     ui.run_with(app, prod_js=False)
