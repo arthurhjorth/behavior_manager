@@ -125,3 +125,8 @@ Person/response:
   - Implemented XLSX writing from `PopulationDataset`.
   - Added dataset validation for one-study shape, duplicate question/person IDs, response/question links, and option-backed response values.
   - Verified the strict example workbook reads and round-trips through the writer.
+- `bbdb3bb` `Test strict population XLSX serialization`
+  - Added `tests/test_population_xlsx_serialization.py`.
+  - Covered valid strict workbook parsing, XLSX round-trip, missing sheets, unknown response columns, unknown option question codes, duplicate question codes, duplicate person IDs, and invalid `data_kind`.
+  - Tightened reader validation so `options.question_code` values must refer to known questions.
+  - Verified with `unittest` for the new XLSX tests and existing population integration tests.
