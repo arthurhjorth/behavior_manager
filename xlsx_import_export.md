@@ -117,3 +117,11 @@ Person/response:
 - Invalid `data_kind` or `role` fails validation.
 - Re-import with skip-existing is idempotent.
 
+## Implementation Log
+
+- `bc125de` `Add strict population XLSX serialization`
+  - Added `services/population_xlsx_serialization_service.py`.
+  - Implemented strict one-study XLSX reading for `study`, `questions`, optional `options`, and `responses`.
+  - Implemented XLSX writing from `PopulationDataset`.
+  - Added dataset validation for one-study shape, duplicate question/person IDs, response/question links, and option-backed response values.
+  - Verified the strict example workbook reads and round-trips through the writer.
