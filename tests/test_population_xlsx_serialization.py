@@ -5,8 +5,17 @@ import tempfile
 import unittest
 
 from openpyxl import Workbook
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlalchemy.pool import StaticPool
 
-from services.population_xlsx_serialization_service import read_population_xlsx, write_population_xlsx
+from models import PopulationPersonRecord, PopulationQuestionRecord, PopulationResponseRecord
+from repositories import population_repo
+from services.population_xlsx_serialization_service import (
+    export_population_xlsx,
+    import_population_xlsx,
+    read_population_xlsx,
+    write_population_xlsx,
+)
 
 
 def strict_workbook(
@@ -237,6 +246,65 @@ class PopulationXlsxSerializationTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "Invalid questions row 2 data_kind"):
                 read_population_xlsx(path)
+
+    def test_import_population_xlsx_persists_dataset_and_skips_existing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "strict.xlsx"
+            strict_workbook(path)
+            engine = create_engine(
+                "sqlite://",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
+            SQLModel.metadata.create_all(engine)
+
+            with Session(engine) as session:
+                first = import_population_xlsx(session, path)
+                session.commit()
+                study = population_repo.get_study_by_external_id(session, "mini_food_study")
+
+                second = import_population_xlsx(session, path)
+                session.commit()
+
+                self.assertIsNotNone(study)
+                self.assertEqual(first.studies_created, 1)
+                self.assertEqual(first.questions_created, 2)
+                self.assertEqual(first.people_created, 2)
+                self.assertEqual(first.responses_created, 4)
+                self.assertEqual(second.studies_created, 0)
+                self.assertEqual(second.questions_created, 0)
+                self.assertEqual(second.people_created, 0)
+                self.assertEqual(second.responses_created, 0)
+                self.assertEqual(second.people_skipped, 2)
+                self.assertEqual(population_repo.count_questions(session, int(study.id)), 2)
+                self.assertEqual(population_repo.count_people(session, int(study.id)), 2)
+                self.assertEqual(len(list(session.exec(select(PopulationQuestionRecord)))), 2)
+                self.assertEqual(len(list(session.exec(select(PopulationPersonRecord)))), 2)
+                self.assertEqual(len(list(session.exec(select(PopulationResponseRecord)))), 4)
+
+    def test_export_population_xlsx_writes_db_study(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "strict.xlsx"
+            exported = Path(tmp) / "db_export.xlsx"
+            strict_workbook(source)
+            engine = create_engine(
+                "sqlite://",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
+            SQLModel.metadata.create_all(engine)
+
+            with Session(engine) as session:
+                import_population_xlsx(session, source)
+                session.commit()
+                study = population_repo.get_study_by_external_id(session, "mini_food_study")
+
+                export_population_xlsx(session, study_id=int(study.id), path=exported)
+
+            round_tripped = read_population_xlsx(exported)
+            self.assertEqual(round_tripped.studies[0].id, "mini_food_study")
+            self.assertEqual(len(round_tripped.questions), 2)
+            self.assertEqual(len(round_tripped.people), 2)
 
 
 if __name__ == "__main__":

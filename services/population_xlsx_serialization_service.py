@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
+from sqlmodel import Session
 
 from population_data.models import (
     AttentionOrQualityQuestion,
@@ -35,6 +36,8 @@ from population_data.models import (
     TextQuestion,
     ValueKind,
 )
+from services import population_serialization_service
+from services.population_serialization_service import PopulationDatasetImportResult
 
 
 REQUIRED_SHEETS = {"study", "questions", "responses"}
@@ -106,6 +109,11 @@ def read_population_xlsx(path: Path) -> PopulationDataset:
     return dataset
 
 
+def is_strict_population_xlsx(path: Path) -> bool:
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    return REQUIRED_SHEETS.issubset(set(workbook.sheetnames))
+
+
 def write_population_xlsx(dataset: PopulationDataset, path: Path) -> None:
     issues = validate_population_dataset(dataset)
     if issues:
@@ -121,6 +129,32 @@ def write_population_xlsx(dataset: PopulationDataset, path: Path) -> None:
     _write_responses(workbook.create_sheet("responses"), dataset)
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)
+
+
+def import_population_xlsx(
+    session: Session,
+    path: Path,
+    *,
+    skip_existing: bool = True,
+) -> PopulationDatasetImportResult:
+    dataset = read_population_xlsx(path)
+    return population_serialization_service.import_population_dataset(session, dataset, skip_existing=skip_existing)
+
+
+def export_population_xlsx(
+    session: Session,
+    *,
+    study_id: int,
+    path: Path,
+    include_people: bool = True,
+) -> PopulationDataset:
+    dataset = population_serialization_service.export_population_dataset(
+        session,
+        study_ids=[study_id],
+        include_people=include_people,
+    )
+    write_population_xlsx(dataset, path)
+    return dataset
 
 
 def validate_population_dataset(dataset: PopulationDataset) -> list[ValidationIssue]:

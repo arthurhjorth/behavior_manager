@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
 
 from sqlmodel import Session, select
 
 from models import (
+    PopulationDataKind,
     PopulationPersonAttributeRecord,
     PopulationPersonRecord,
     PopulationPersonWeightRecord,
+    PopulationQuestionRole,
     PopulationQuestionOptionRecord,
     PopulationQuestionRecord,
     PopulationQuestionScaleRecord,
     PopulationResponseRecord,
     PopulationSourceRefRecord,
     PopulationStudyRecord,
+    PopulationValueKind,
 )
 from population_data.models import (
     AttentionOrQualityQuestion,
@@ -45,6 +49,31 @@ from population_data.models import (
 from repositories import population_repo
 
 
+@dataclass(frozen=True)
+class PopulationDatasetImportResult:
+    studies_created: int = 0
+    studies_skipped: int = 0
+    questions_created: int = 0
+    questions_skipped: int = 0
+    people_created: int = 0
+    people_skipped: int = 0
+    responses_created: int = 0
+    responses_skipped: int = 0
+    attributes_created: int = 0
+    weights_created: int = 0
+
+    @property
+    def total_created(self) -> int:
+        return (
+            self.studies_created
+            + self.questions_created
+            + self.people_created
+            + self.responses_created
+            + self.attributes_created
+            + self.weights_created
+        )
+
+
 def export_population_dataset(
     session: Session,
     *,
@@ -67,6 +96,134 @@ def export_population_dataset(
             "format": "population_data.models.PopulationDataset",
         },
     )
+
+
+def import_population_dataset(
+    session: Session,
+    dataset: PopulationDataset,
+    *,
+    skip_existing: bool = True,
+) -> PopulationDatasetImportResult:
+    if not skip_existing:
+        raise NotImplementedError("Only skip_existing=True is currently supported for population dataset imports.")
+
+    counts = {
+        "studies_created": 0,
+        "studies_skipped": 0,
+        "questions_created": 0,
+        "questions_skipped": 0,
+        "people_created": 0,
+        "people_skipped": 0,
+        "responses_created": 0,
+        "responses_skipped": 0,
+        "attributes_created": 0,
+        "weights_created": 0,
+    }
+    studies_by_external_id: dict[str, PopulationStudyRecord] = {}
+    for study in dataset.studies:
+        row = population_repo.get_study_by_external_id(session, study.id)
+        if row is None:
+            row = population_repo.create_study(
+                session,
+                external_id=study.id,
+                name=study.name,
+                source_file=study.source_file,
+                source_sheet=study.source_sheet,
+                description=study.description,
+                collected_at=study.collected_at,
+                metadata=study.metadata,
+            )
+            counts["studies_created"] += 1
+        else:
+            counts["studies_skipped"] += 1
+        studies_by_external_id[study.id] = row
+
+    questions_by_external_id: dict[str, PopulationQuestionRecord] = {}
+    for question in dataset.questions:
+        study = studies_by_external_id.get(question.study_id)
+        if study is None or study.id is None:
+            raise ValueError(f"Question {question.id!r} references unknown study {question.study_id!r}.")
+        row = population_repo.get_question_by_external_id(session, question.id)
+        if row is None:
+            source = _create_source_ref(session, question.source)
+            scale = _create_scale(session, question.scale)
+            row = population_repo.create_question(
+                session,
+                PopulationQuestionRecord(
+                    external_id=question.id,
+                    study_id=int(study.id),
+                    source_ref_id=int(source.id),
+                    scale_id=int(scale.id) if scale and scale.id is not None else None,
+                    kind=_db_data_kind(question.kind.value),
+                    wording=question.wording,
+                    short_name=question.short_name,
+                    role=_db_question_role(question.role.value),
+                    constructs_json=population_repo.json_dump(question.constructs),
+                    missing_codes_json=population_repo.json_dump(question.missing_codes),
+                    reverse_scored=question.reverse_scored,
+                    harmonized_variable_id=question.harmonized_variable_id,
+                    metadata_json=population_repo.json_dump(question.metadata),
+                ),
+            )
+            counts["questions_created"] += 1
+        else:
+            counts["questions_skipped"] += 1
+        questions_by_external_id[question.id] = row
+
+    for person in dataset.people:
+        study = studies_by_external_id.get(person.study_id)
+        if study is None or study.id is None:
+            raise ValueError(f"Person {person.id!r} references unknown study {person.study_id!r}.")
+        existing = population_repo.get_person_by_external_id(session, person.id)
+        if existing is not None:
+            counts["people_skipped"] += 1
+            counts["responses_skipped"] += len(person.responses)
+            continue
+
+        source = _create_source_ref(session, person.source)
+        person_row = population_repo.create_person(
+            session,
+            PopulationPersonRecord(
+                external_id=person.id,
+                study_id=int(study.id),
+                source_ref_id=int(source.id),
+                source_person_id=person.source_person_id,
+                metadata_json=population_repo.json_dump(person.metadata),
+            ),
+        )
+        counts["people_created"] += 1
+
+        for name, value in person.attributes.items():
+            population_repo.create_person_attribute(
+                session,
+                PopulationPersonAttributeRecord(
+                    person_id=int(person_row.id),
+                    name=name,
+                    **_value_columns(value),
+                ),
+            )
+            counts["attributes_created"] += 1
+        for name, value in person.weights.items():
+            population_repo.create_person_weight(session, person_id=int(person_row.id), name=name, value=float(value))
+            counts["weights_created"] += 1
+        for response in person.responses:
+            question = questions_by_external_id.get(response.question_id)
+            if question is None or question.id is None:
+                raise ValueError(f"Response for person {person.id!r} references unknown question {response.question_id!r}.")
+            source = _create_source_ref(session, response.source)
+            population_repo.create_response(
+                session,
+                PopulationResponseRecord(
+                    person_id=int(person_row.id),
+                    question_id=int(question.id),
+                    source_ref_id=int(source.id),
+                    metadata_json=population_repo.json_dump(response.metadata),
+                    **_value_columns(response.value),
+                ),
+            )
+            counts["responses_created"] += 1
+
+    return PopulationDatasetImportResult(**counts)
 
 
 def _selected_studies(session: Session, study_ids: Iterable[int] | None) -> list[PopulationStudyRecord]:
@@ -291,3 +448,68 @@ def _value_kind(value: str) -> ValueKind:
         return ValueKind(value)
     except ValueError:
         return ValueKind.MISSING
+
+
+def _create_source_ref(session: Session, source: SourceRef) -> PopulationSourceRefRecord:
+    return population_repo.create_source_ref(
+        session,
+        file_path=source.file_path,
+        sheet_name=source.sheet_name,
+        row_index=source.row_index,
+        column_index=source.column_index,
+        column_name=source.column_name,
+    )
+
+
+def _create_scale(session: Session, scale: Scale | None) -> PopulationQuestionScaleRecord | None:
+    if scale is None:
+        return None
+    return population_repo.create_question_scale(
+        session,
+        min_value=scale.min_value,
+        max_value=scale.max_value,
+        min_label=scale.min_label,
+        max_label=scale.max_label,
+        step=scale.step,
+        raw_description=scale.raw_description,
+        options=[
+            {
+                "value": option.value,
+                "label": option.label,
+                "order": option.order,
+                "is_missing": option.is_missing,
+            }
+            for option in scale.options
+        ],
+    )
+
+
+def _value_columns(value: ResponseValue) -> dict[str, Any]:
+    return {
+        "value_kind": _db_value_kind(value.kind.value),
+        "raw_json": population_repo.json_dump(value.raw),
+        "normalized_json": population_repo.json_dump(value.normalized),
+        "label": value.label,
+        "is_missing": value.is_missing,
+    }
+
+
+def _db_data_kind(value: str) -> PopulationDataKind:
+    try:
+        return PopulationDataKind(value)
+    except ValueError:
+        return PopulationDataKind.unknown
+
+
+def _db_question_role(value: str) -> PopulationQuestionRole:
+    try:
+        return PopulationQuestionRole(value)
+    except ValueError:
+        return PopulationQuestionRole.unknown
+
+
+def _db_value_kind(value: str) -> PopulationValueKind:
+    try:
+        return PopulationValueKind(value)
+    except ValueError:
+        return PopulationValueKind.missing
